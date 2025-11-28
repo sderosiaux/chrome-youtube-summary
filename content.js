@@ -242,8 +242,18 @@
   }
 
 
+  // Store content for tabs
+  let currentSummary = null;
+  let currentQA = null;
+  let currentMetadata = null;
+
   // Show fullscreen popup
-  function showSummaryPopup(summary, metadata) {
+  function showSummaryPopup(summary, metadata, qa = null) {
+    // Store content for tab switching
+    currentSummary = summary;
+    currentQA = qa;
+    currentMetadata = metadata;
+
     // Remove existing popup if any
     const existingPopup = document.getElementById('youtube-summary-popup');
     if (existingPopup) {
@@ -262,6 +272,10 @@
               <p class="channel">${metadata.channel || 'Unknown Channel'}</p>
             </div>
             <button class="close-btn">&times;</button>
+          </div>
+          <div class="popup-tabs">
+            <button class="tab-btn active" data-tab="summary">Résumé</button>
+            <button class="tab-btn" data-tab="qa">Q&A</button>
           </div>
           <div class="popup-body">
             <div class="summary-content">
@@ -287,21 +301,52 @@
     const copyBtn = popup.querySelector('.copy-btn');
     const regenerateBtn = popup.querySelector('.regenerate-btn');
     const overlay = popup.querySelector('.popup-overlay');
+    const tabBtns = popup.querySelectorAll('.tab-btn');
 
     closeBtn.addEventListener('click', () => popup.remove());
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay) popup.remove();
     });
 
+    // Tab switching
+    tabBtns.forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const tab = btn.dataset.tab;
+
+        // Update active tab styling
+        tabBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+
+        if (tab === 'summary') {
+          initializeMarkdownPreview(currentSummary);
+        } else if (tab === 'qa') {
+          if (currentQA) {
+            initializeMarkdownPreview(currentQA);
+          } else {
+            // Generate Q&A if not already generated
+            await generateQAContent();
+          }
+        }
+      });
+    });
+
     copyBtn.addEventListener('click', () => {
-      navigator.clipboard.writeText(summary).then(() => {
+      const activeTab = popup.querySelector('.tab-btn.active').dataset.tab;
+      const contentToCopy = activeTab === 'summary' ? currentSummary : currentQA;
+      navigator.clipboard.writeText(contentToCopy || '').then(() => {
         copyBtn.textContent = 'Copié!';
         setTimeout(() => copyBtn.textContent = 'Copier', 2000);
       });
     });
 
     regenerateBtn.addEventListener('click', () => {
-      triggerSummary(true);
+      const activeTab = popup.querySelector('.tab-btn.active').dataset.tab;
+      if (activeTab === 'summary') {
+        triggerSummary(true);
+      } else {
+        currentQA = null;
+        generateQAContent();
+      }
     });
 
     // Close on Escape key
@@ -312,6 +357,34 @@
       }
     };
     document.addEventListener('keydown', handleEscape);
+  }
+
+  // Generate Q&A content
+  async function generateQAContent() {
+    const previewDiv = document.querySelector('.markdown-preview');
+    if (previewDiv) {
+      previewDiv.innerHTML = '<div class="qa-loading"><div class="loading-spinner"></div><p>Extraction des Q&A...</p></div>';
+    }
+
+    try {
+      const response = await chrome.runtime.sendMessage({
+        action: 'generateQA',
+        transcript: transcriptData,
+        title: currentMetadata.title,
+        channel: currentMetadata.channel,
+        url: currentMetadata.url
+      });
+
+      if (response && response.qa) {
+        currentQA = response.qa;
+        initializeMarkdownPreview(currentQA);
+      } else {
+        previewDiv.innerHTML = '<p class="qa-error">Impossible de générer les Q&A. Ce contenu ne semble pas être un format interview/webinar.</p>';
+      }
+    } catch (error) {
+      console.error('YouTube Summary: Error generating Q&A:', error);
+      previewDiv.innerHTML = '<p class="qa-error">Erreur lors de la génération des Q&A.</p>';
+    }
   }
 
   // Show loading popup
