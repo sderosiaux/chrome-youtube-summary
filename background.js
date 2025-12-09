@@ -87,18 +87,6 @@ Extraire TOUS les chiffres mentionnés:
 * 💬 Opinionnelles (jugements personnels)
 * ⚠️ À vérifier (claims sans source)
 
-## Mindmap
-\`\`\`
-SUJET PRINCIPAL
-├─ Concept 1
-│  ├─ Sous-concept A
-│  └─ Sous-concept B
-├─ Concept 2
-│  └─ Application pratique
-└─ Concept 3
-   └─ Implication majeure
-\`\`\`
-
 ## Synthèse
 * Éléments majeurs + prochaines étapes logiques
 * ⚠️ Points faibles/manquant de support
