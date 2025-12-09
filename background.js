@@ -54,96 +54,60 @@ async function generateAISummary({ transcript, title, channel, url }) {
 
     // Default prompt if none provided
     const customPrompt = `
-Résumé EXHAUSTIF en français • Termes techniques → anglais • Vidéo ~1h+ = analyse proportionnelle
+Résumé EXHAUSTIF en français • Termes techniques → anglais • Longueur proportionnelle au contenu
 
-STYLE REQUIS:
-* Nettoyer les formulations peu importantes pour polir le style et le rendre plus incisif
-* Utiliser des symboles pour raccourcir les idées (*, →, ≠, ~, +, etc.)
+STYLE: Incisif, direct • Symboles: →, ≠, ~, +, *, etc.
 
-DÉTECTION AUTO DU TYPE:
-* TALK/CONFÉRENCE → focus sur thèse centrale + arguments + implications pratiques
-* REVIEW/ANALYSE → focus sur méthodologie + évaluation + comparaisons + recommandations
+TYPE AUTO-DÉTECTÉ:
+- TALK/CONFÉRENCE → thèse + arguments + implications
+- REVIEW/ANALYSE → méthodologie + évaluation + recommandations
 
-## 0. Résumé brutal
-→ Une phrase directe qui capture l'essence du contenu
+---
 
-## 1. Sujet Principal
-[TALK] * Thèse/message central défendu + pourquoi maintenant
-[REVIEW] * Sujet analysé + méthodologie/angle d'évaluation utilisé
-* Contexte & problématique abordée
-* Positionnement dans son domaine
+## TL;DR
+→ Une phrase brutale capturant l'essence
 
-## 1.5. Hiérarchie d'Importance
-CRITIQUE (20% → 80% valeur):
-* Les 2-3 insights qui changent vraiment la donne
-* Points que l'auteur répète/emphasise le plus
+## Contexte
+* [TALK] Thèse défendue + pourquoi maintenant | [REVIEW] Sujet + angle d'analyse
+* Problématique & positionnement dans le domaine
 
-IMPORTANT (30% du contenu):
-* Arguments solides qui supportent le message principal
-* Exemples concrets avec impact mesurable
+## Points Clés (8-12)
+Classés par importance décroissante. Pour chaque point:
+* **Point** → Affirmation factuelle extraite de la transcription
+  - 💭 *Opinion*: Position/jugement de l'auteur (si applicable)
+  - 📊 *Preuve*: Donnée/étude/stat citée (si applicable)
+  - ⚡ *Impact*: Conséquence pratique
 
-SECONDAIRE (50% restant):
-* Contexte utile mais pas essentiel
-* Détails techniques ou anecdotes illustratives
+## Données & Stats
+Extraire TOUS les chiffres mentionnés:
+* % | Montants | Volumes | Dates | Comparaisons | Métriques
 
-## 2. Points Clés (8-12) - AVEC DISTINCTION
-Format pour chaque point:
-* Point principal → Fait établi basé sur la transcription
-  - Opinion: Position/jugement exprimé par l'auteur
-  - Preuve: Recherche/stats/données citées par le speaker
-  - Implication: Analyse/conséquence déduite
+## Citations Clés
+* 📌 Factuelles (vérifiables)
+* 💬 Opinionnelles (jugements personnels)
+* ⚠️ À vérifier (claims sans source)
 
-## 3. Insights & Leçons - AVEC SOURCES
-Format pour chaque insight:
-* Insight principal avec base factuelle (citations directes)
-  - Opinion: Perspective/position exprimée par l'auteur
-  - Preuve: Étude/recherche/statistique mentionnée pour appuyer
-  - Application: Conséquences pratiques et implications
+## Actions
+* 🔥 IMMÉDIAT: Action → résultat rapide
+* 📅 COURT TERME: Action → prérequis → ROI attendu
+* 🎯 LONG TERME: Vision → étapes → indicateurs
 
-## 4. Citations Marquantes
-* Citations FACTUELLES: [Affirmations vérifiables]
-* Citations OPINIONNELLES: [Jugements/positions personnelles]
-* Affirmations à vérifier: [Claims qui demandent validation externe]
-
-## 4.5. Statistiques & Données Clés
-Extraire tous les nombres précis et stats importantes mentionnés:
-* Pourcentages: [Ex: "75% des entreprises utilisent..."]
-* Montants/Budget: [Ex: "$2.5M de financement levé"]
-* Volumes/Quantités: [Ex: "10 millions d'utilisateurs"]
-* Dates/Années: [Ex: "Depuis 2019, croissance de..."]
-* Comparaisons chiffrées: [Ex: "3x plus rapide que..."]
-* Métriques business: [Ex: "ROI de 150%", "Conversion +25%"]
-
-## 5. À Retenir (par thème + type)
-* FAITS établis: Points vérifiables
-* POSITIONS défendues: Arguments de l'auteur
-* IMPLICATIONS: Conséquences logiques
-
-## 6. Actions Recommandées
-* IMMÉDIAT (impact élevé, effort faible): Action → résultat dans X jours
-* COURT TERME (préparation requise): Action → prérequis → ROI
-* LONG TERME (investissement important): Vision → étapes → indicateurs
-
-## 6.5. Mindmap ASCII - Concepts Principaux/Secondaires
-Structure hiérarchique en ASCII des concepts clés dans un block code:
-
+## Mindmap
+\`\`\`
 SUJET PRINCIPAL
-Concept Principal 1
--> Sous-concept A
--> Sous-concept B
-Concept Principal 2
--> Détail important
--> Application pratique
-Concept Principal 3
--> Implication majeure
--> Lien avec autres domaines
+├─ Concept 1
+│  ├─ Sous-concept A
+│  └─ Sous-concept B
+├─ Concept 2
+│  └─ Application pratique
+└─ Concept 3
+   └─ Implication majeure
+\`\`\`
 
-Organiser par ordre d'importance décroissante
-
-## 7. Conclusion + Validation
-* Synthèse: éléments majeurs + implications + prochaines étapes
-* Points manquant de support dans la transcription originale
-* Niveau de confiance global: ÉLEVÉ → FAIBLE
+## Synthèse
+* Éléments majeurs + prochaines étapes logiques
+* ⚠️ Points faibles/manquant de support
+* Confiance: 🟢 ÉLEVÉE | 🟡 MOYENNE | 🔴 FAIBLE
     `.trim();
 
     const prompt = `
