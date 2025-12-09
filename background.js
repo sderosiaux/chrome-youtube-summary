@@ -87,11 +87,6 @@ Extraire TOUS les chiffres mentionnés:
 * 💬 Opinionnelles (jugements personnels)
 * ⚠️ À vérifier (claims sans source)
 
-## Actions
-* 🔥 IMMÉDIAT: Action → résultat rapide
-* 📅 COURT TERME: Action → prérequis → ROI attendu
-* 🎯 LONG TERME: Vision → étapes → indicateurs
-
 ## Mindmap
 \`\`\`
 SUJET PRINCIPAL
