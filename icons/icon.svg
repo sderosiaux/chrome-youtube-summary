@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- YouTube-style rounded rectangle background -->
+  <rect x="4" y="24" width="120" height="80" rx="16" ry="16" fill="#FF0000"/>
+
+  <!-- Document/summary lines on the left -->
+  <g fill="#FFFFFF" opacity="0.9">
+    <rect x="20" y="44" width="32" height="4" rx="2"/>
+    <rect x="20" y="54" width="28" height="4" rx="2"/>
+    <rect x="20" y="64" width="32" height="4" rx="2"/>
+    <rect x="20" y="74" width="24" height="4" rx="2"/>
+  </g>
+
+  <!-- Play button triangle on the right -->
+  <polygon points="72,44 72,84 104,64" fill="#FFFFFF"/>
+</svg>
