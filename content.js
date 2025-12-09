@@ -465,12 +465,47 @@
     }
   }
 
+  // Create floating action button
+  function createSummaryButton() {
+    // Only show on video pages
+    if (!location.href.includes('/watch?v=')) {
+      const existingBtn = document.getElementById('yt-summary-fab');
+      if (existingBtn) existingBtn.remove();
+      return;
+    }
+
+    // Check if button already exists
+    if (document.getElementById('yt-summary-fab')) {
+      return;
+    }
+
+    const button = document.createElement('button');
+    button.id = 'yt-summary-fab';
+    button.className = 'yt-summary-fab';
+    button.innerHTML = `
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polygon points="5,3 19,12 5,21" fill="currentColor" stroke="none"/>
+      </svg>
+      <span>Résumer</span>
+    `;
+
+    button.addEventListener('click', () => {
+      console.log('YouTube Summary: FAB clicked');
+      triggerSummary();
+    });
+
+    document.body.appendChild(button);
+    console.log('YouTube Summary: FAB added to page');
+  }
+
   // Listen for URL changes (YouTube SPA navigation)
   const observer = new MutationObserver(() => {
     if (location.href !== currentUrl) {
       currentUrl = location.href;
       transcriptData = null; // Reset transcript data for new video
       console.log('YouTube Summary: Video changed');
+      // Recreate button for new page
+      setTimeout(createSummaryButton, 500);
     }
   });
 
@@ -486,6 +521,13 @@
     }
     return true;
   });
+
+  // Initialize button on load
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', createSummaryButton);
+  } else {
+    createSummaryButton();
+  }
 
   console.log('YouTube Summary: Content script initialized');
 })();
