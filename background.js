@@ -65,11 +65,7 @@ TYPE AUTO-DÉTECTÉ:
 ---
 
 ## TL;DR
-→ Une phrase brutale capturant l'essence
-
-## Contexte
-* [TALK] Thèse défendue + pourquoi maintenant | [REVIEW] Sujet + angle d'analyse
-* Problématique & positionnement dans le domaine
+[TALK/REVIEW] → Une phrase brutale capturant l'essence + positionnement
 
 ## Points Clés (8-12)
 Classés par importance décroissante. Pour chaque point:
@@ -87,10 +83,9 @@ Extraire TOUS les chiffres mentionnés:
 * 💬 Opinionnelles (jugements personnels)
 * ⚠️ À vérifier (claims sans source)
 
-## Synthèse
-* Éléments majeurs + prochaines étapes logiques
-* ⚠️ Points faibles/manquant de support
-* Confiance: 🟢 ÉLEVÉE | 🟡 MOYENNE | 🔴 FAIBLE
+## Fiabilité
+* ⚠️ Points faibles ou manquant de support dans la transcription
+* Confiance globale: 🟢 ÉLEVÉE | 🟡 MOYENNE | 🔴 FAIBLE
     `.trim();
 
     const prompt = `
