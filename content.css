@@ -212,6 +212,36 @@
   margin-right: 16px;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.copy-all-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: var(--button-secondary-bg);
+  border: 1px solid var(--button-secondary-border);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.copy-all-btn:hover {
+  background: var(--button-secondary-hover);
+  border-color: var(--text-muted);
+}
+
+.copy-all-btn svg {
+  flex-shrink: 0;
+}
+
 .popup-header h2 {
   margin: 0 0 2px 0;
   font-size: 18px;

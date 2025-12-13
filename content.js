@@ -271,7 +271,16 @@
               <h2>${metadata.title}</h2>
               <p class="channel">${metadata.channel || 'Unknown Channel'}</p>
             </div>
-            <button class="close-btn">&times;</button>
+            <div class="header-actions">
+              <button class="copy-all-btn" title="Copier tout en Markdown">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+                <span>Copier tout</span>
+              </button>
+              <button class="close-btn">&times;</button>
+            </div>
           </div>
           <div class="popup-tabs">
             <button class="tab-btn active" data-tab="summary">Résumé</button>
@@ -299,6 +308,7 @@
     // Add event listeners
     const closeBtn = popup.querySelector('.close-btn');
     const copyBtn = popup.querySelector('.copy-btn');
+    const copyAllBtn = popup.querySelector('.copy-all-btn');
     const regenerateBtn = popup.querySelector('.regenerate-btn');
     const overlay = popup.querySelector('.popup-overlay');
     const tabBtns = popup.querySelectorAll('.tab-btn');
@@ -306,6 +316,28 @@
     closeBtn.addEventListener('click', () => popup.remove());
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay) popup.remove();
+    });
+
+    // Copy all content (Summary + Q&A if available) in markdown format
+    copyAllBtn.addEventListener('click', () => {
+      let fullMarkdown = `# ${metadata.title}\n`;
+      fullMarkdown += `**Channel:** ${metadata.channel || 'Unknown'}\n`;
+      fullMarkdown += `**URL:** ${metadata.url}\n\n`;
+      fullMarkdown += `---\n\n`;
+      fullMarkdown += `## Résumé\n\n`;
+      fullMarkdown += currentSummary || '_Pas de résumé disponible_';
+
+      if (currentQA) {
+        fullMarkdown += `\n\n---\n\n`;
+        fullMarkdown += `## Q&A\n\n`;
+        fullMarkdown += currentQA;
+      }
+
+      navigator.clipboard.writeText(fullMarkdown).then(() => {
+        const span = copyAllBtn.querySelector('span');
+        span.textContent = 'Copié!';
+        setTimeout(() => span.textContent = 'Copier tout', 2000);
+      });
     });
 
     // Tab switching
