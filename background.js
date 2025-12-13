@@ -1,6 +1,9 @@
 // background.js
 console.log("YouTube Summary: Background script loaded");
 
+// Store active AbortControllers to allow cancellation
+const activeRequests = new Map();
+
 chrome.runtime.onInstalled.addListener(() => {
   console.log("YouTube Summary: Extension installed");
 });
@@ -9,26 +12,43 @@ chrome.runtime.onInstalled.addListener(() => {
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   console.log("YouTube Summary: Message received in background:", request);
 
+  if (request.action === "cancelRequest") {
+    const controller = activeRequests.get(request.requestId);
+    if (controller) {
+      controller.abort();
+      activeRequests.delete(request.requestId);
+      console.log("YouTube Summary: Request cancelled:", request.requestId);
+    }
+    sendResponse({ cancelled: true });
+    return true;
+  }
+
   if (request.action === "generateSummary") {
-    generateAISummary(request)
+    const requestId = request.requestId || Date.now().toString();
+    generateAISummary(request, requestId)
       .then((summary) => {
+        activeRequests.delete(requestId);
         sendResponse({ summary });
       })
       .catch((error) => {
+        activeRequests.delete(requestId);
         console.error("YouTube Summary: Error generating summary:", error);
-        sendResponse({ error: error.message });
+        sendResponse({ error: error.message, cancelled: error.name === 'AbortError' });
       });
     return true; // Keep message channel open for async response
   }
 
   if (request.action === "generateQA") {
-    generateQAExtraction(request)
+    const requestId = request.requestId || Date.now().toString();
+    generateQAExtraction(request, requestId)
       .then((qa) => {
+        activeRequests.delete(requestId);
         sendResponse({ qa });
       })
       .catch((error) => {
+        activeRequests.delete(requestId);
         console.error("YouTube Summary: Error generating Q&A:", error);
-        sendResponse({ error: error.message });
+        sendResponse({ error: error.message, cancelled: error.name === 'AbortError' });
       });
     return true;
   }
@@ -36,8 +56,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   return true;
 });
 
+// API timeout in milliseconds (10 minutes for very long videos)
+const API_TIMEOUT_MS = 600000;
+
 // Generate AI summary using OpenAI API
-async function generateAISummary({ transcript, title, channel, url }) {
+async function generateAISummary({ transcript, title, channel, url }, requestId) {
+  // Create AbortController for timeout and cancellation
+  const controller = new AbortController();
+  activeRequests.set(requestId, controller);
+
+  // Set timeout
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+    console.error("YouTube Summary: API request timed out after", API_TIMEOUT_MS / 1000, "seconds");
+  }, API_TIMEOUT_MS);
+
   try {
     // Get API key from storage
     const result = await chrome.storage.sync.get([
@@ -117,7 +150,10 @@ ${transcript}
         max_completion_tokens: 8000,
         temperature: 0.7,
       }),
+      signal: controller.signal,
     });
+
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       const errorData = await response.json();
@@ -138,6 +174,10 @@ ${transcript}
     console.log("YouTube Summary: Summary generated successfully");
     return summary;
   } catch (error) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      throw new Error("Requête annulée ou timeout dépassé (2 min)");
+    }
     console.error("YouTube Summary: Error in generateAISummary:", error);
     console.error("YouTube Summary: Full error details:", error.message, error.stack);
     throw error;
@@ -145,7 +185,17 @@ ${transcript}
 }
 
 // Generate Q&A extraction using OpenAI API
-async function generateQAExtraction({ transcript, title, channel, url }) {
+async function generateQAExtraction({ transcript, title, channel, url }, requestId) {
+  // Create AbortController for timeout and cancellation
+  const controller = new AbortController();
+  activeRequests.set(requestId, controller);
+
+  // Set timeout
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+    console.error("YouTube Summary: Q&A API request timed out after", API_TIMEOUT_MS / 1000, "seconds");
+  }, API_TIMEOUT_MS);
+
   try {
     // Get API key from storage
     const result = await chrome.storage.sync.get(["openaiApiKey"]);
@@ -204,7 +254,10 @@ ${transcript}
         max_completion_tokens: 4000,
         temperature: 0.5,
       }),
+      signal: controller.signal,
     });
+
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       const errorData = await response.json();
@@ -223,6 +276,10 @@ ${transcript}
     console.log("YouTube Summary: Q&A generated successfully");
     return qa;
   } catch (error) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      throw new Error("Requête annulée ou timeout dépassé (2 min)");
+    }
     console.error("YouTube Summary: Error in generateQAExtraction:", error);
     throw error;
   }

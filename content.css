@@ -485,6 +485,184 @@
   margin: 20px auto;
 }
 
+.loading-spinner-small {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--spinner-track);
+  border-top: 2px solid var(--spinner-fill);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.popup-content.loading {
+  max-width: 450px;
+}
+
+.popup-content.loading .popup-body {
+  padding: 24px;
+}
+
+/* Progress steps */
+.loading-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 24px;
+  text-align: left;
+}
+
+.progress-step {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  opacity: 0.4;
+  transition: all 0.3s ease;
+}
+
+.progress-step.active {
+  opacity: 1;
+}
+
+.progress-step.completed {
+  opacity: 0.7;
+}
+
+.step-icon {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.step-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.step-check {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #10b981;
+  color: white;
+  font-size: 12px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.step-text {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.progress-step.active .step-text {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.progress-step.completed .step-text {
+  color: var(--text-muted);
+}
+
+/* Loading stats (timer + tokens) */
+.loading-stats {
+  display: flex;
+  justify-content: center;
+  gap: 32px;
+  margin-bottom: 16px;
+}
+
+.loading-timer,
+.loading-tokens {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.timer-value,
+.tokens-value {
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.timer-label,
+.tokens-label {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.loading-hint {
+  font-size: 13px;
+  color: var(--text-faint);
+  margin: 0 0 20px 0;
+}
+
+/* Cancel button */
+.cancel-btn {
+  padding: 10px 24px;
+  border: 1px solid var(--button-secondary-border);
+  border-radius: 8px;
+  background: var(--button-secondary-bg);
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.cancel-btn:hover {
+  background: var(--button-secondary-hover);
+  border-color: var(--text-muted);
+}
+
+/* Error popup */
+.error-popup {
+  max-width: 400px;
+  text-align: center;
+}
+
+.error-popup .popup-body {
+  padding: 32px 24px;
+}
+
+.error-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+
+.error-message {
+  color: var(--text-secondary);
+  font-size: 15px;
+  line-height: 1.5;
+  margin-bottom: 24px;
+  word-break: break-word;
+}
+
+.retry-btn {
+  padding: 12px 32px;
+  border: none;
+  border-radius: 8px;
+  background: var(--button-primary-bg);
+  color: white;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.retry-btn:hover {
+  background: var(--button-primary-hover);
+  transform: translateY(-1px);
+}
+
 .popup-content.loading p {
   color: var(--text-muted);
   margin: 20px 0;

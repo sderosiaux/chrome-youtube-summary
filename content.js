@@ -387,20 +387,71 @@
     }
   }
 
-  // Show loading popup
+  // Current request ID for cancellation
+  let currentRequestId = null;
+  let loadingTimerInterval = null;
+
+  // Estimate token count (roughly 4 chars per token for mixed content)
+  function estimateTokens(text) {
+    if (!text) return 0;
+    return Math.ceil(text.length / 4);
+  }
+
+  // Format token count for display
+  function formatTokenCount(tokens) {
+    if (tokens >= 1000) {
+      return `~${(tokens / 1000).toFixed(1)}k`;
+    }
+    return `~${tokens}`;
+  }
+
+  // Show loading popup with progress stages
   function showLoadingPopup() {
+    // Generate unique request ID
+    currentRequestId = Date.now().toString();
+
     const popup = document.createElement('div');
     popup.id = 'youtube-summary-popup';
     popup.innerHTML = `
       <div class="popup-overlay">
         <div class="popup-content loading">
           <div class="popup-header">
-            <h2>Génération du résumé...</h2>
+            <h2>Génération du résumé</h2>
             <button class="close-btn">&times;</button>
           </div>
           <div class="popup-body">
-            <div class="loading-spinner"></div>
-            <p>Extraction de la transcription et génération du résumé AI...</p>
+            <div class="loading-progress">
+              <div class="progress-step active" data-step="extract">
+                <div class="step-icon">
+                  <div class="loading-spinner-small"></div>
+                </div>
+                <div class="step-text">Extraction de la transcription...</div>
+              </div>
+              <div class="progress-step" data-step="api">
+                <div class="step-icon">
+                  <div class="step-dot"></div>
+                </div>
+                <div class="step-text">Envoi à l'API OpenAI</div>
+              </div>
+              <div class="progress-step" data-step="generate">
+                <div class="step-icon">
+                  <div class="step-dot"></div>
+                </div>
+                <div class="step-text">Génération du résumé AI</div>
+              </div>
+            </div>
+            <div class="loading-stats">
+              <div class="loading-timer">
+                <span class="timer-value">0:00</span>
+                <span class="timer-label">écoulé</span>
+              </div>
+              <div class="loading-tokens" style="display: none;">
+                <span class="tokens-value">-</span>
+                <span class="tokens-label">tokens</span>
+              </div>
+            </div>
+            <p class="loading-hint">Les vidéos longues peuvent prendre plusieurs minutes...</p>
+            <button class="cancel-btn">Annuler</button>
           </div>
         </div>
       </div>
@@ -408,10 +459,99 @@
 
     document.body.appendChild(popup);
 
+    // Start timer
+    const startTime = Date.now();
+    const timerElement = popup.querySelector('.timer-value');
+    loadingTimerInterval = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      const minutes = Math.floor(elapsed / 60);
+      const seconds = elapsed % 60;
+      timerElement.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    }, 1000);
+
+    // Close button
     const closeBtn = popup.querySelector('.close-btn');
-    closeBtn.addEventListener('click', () => popup.remove());
+    closeBtn.addEventListener('click', () => {
+      cancelCurrentRequest();
+      popup.remove();
+    });
+
+    // Cancel button
+    const cancelBtn = popup.querySelector('.cancel-btn');
+    cancelBtn.addEventListener('click', () => {
+      cancelCurrentRequest();
+      popup.remove();
+    });
 
     return popup;
+  }
+
+  // Update loading progress step
+  function updateLoadingStep(stepName) {
+    const popup = document.getElementById('youtube-summary-popup');
+    if (!popup) return;
+
+    const steps = popup.querySelectorAll('.progress-step');
+    let foundCurrent = false;
+
+    steps.forEach(step => {
+      const stepId = step.dataset.step;
+
+      if (stepId === stepName) {
+        // Current step - show spinner
+        step.classList.add('active');
+        step.classList.remove('completed');
+        step.querySelector('.step-icon').innerHTML = '<div class="loading-spinner-small"></div>';
+        foundCurrent = true;
+      } else if (!foundCurrent) {
+        // Previous steps - mark as completed
+        step.classList.remove('active');
+        step.classList.add('completed');
+        step.querySelector('.step-icon').innerHTML = '<div class="step-check">✓</div>';
+      } else {
+        // Future steps - show dot
+        step.classList.remove('active', 'completed');
+        step.querySelector('.step-icon').innerHTML = '<div class="step-dot"></div>';
+      }
+    });
+  }
+
+  // Update token count display
+  function updateTokenCount(transcript) {
+    const popup = document.getElementById('youtube-summary-popup');
+    if (!popup) return;
+
+    const tokens = estimateTokens(transcript);
+    const tokensContainer = popup.querySelector('.loading-tokens');
+    const tokensValue = popup.querySelector('.tokens-value');
+
+    if (tokensContainer && tokensValue) {
+      tokensValue.textContent = formatTokenCount(tokens);
+      tokensContainer.style.display = 'flex';
+    }
+  }
+
+  // Cancel current request
+  function cancelCurrentRequest() {
+    if (loadingTimerInterval) {
+      clearInterval(loadingTimerInterval);
+      loadingTimerInterval = null;
+    }
+    if (currentRequestId) {
+      chrome.runtime.sendMessage({
+        action: 'cancelRequest',
+        requestId: currentRequestId
+      });
+      currentRequestId = null;
+    }
+  }
+
+  // Cleanup loading state
+  function cleanupLoading() {
+    if (loadingTimerInterval) {
+      clearInterval(loadingTimerInterval);
+      loadingTimerInterval = null;
+    }
   }
 
   // Main function to trigger summary generation
@@ -425,21 +565,36 @@
     }
 
     const loadingPopup = showLoadingPopup();
+    const requestId = currentRequestId;
 
     try {
-      // Extract transcript if not already done or if forced
+      // Step 1: Extract transcript
+      updateLoadingStep('extract');
       if (!transcriptData || force) {
         transcriptData = await extractTranscript();
       }
 
       if (!transcriptData) {
+        cleanupLoading();
         loadingPopup.remove();
         alert('No transcript available for this video. The video may not have captions enabled.');
         return;
       }
 
+      // Show token count after extraction
+      updateTokenCount(transcriptData);
+
       // Get video metadata
       const metadata = getVideoMetadata();
+
+      // Step 2: Send to API
+      updateLoadingStep('api');
+
+      // Small delay to show the step transition
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      // Step 3: Generate summary
+      updateLoadingStep('generate');
 
       // Send to background script for AI processing
       const response = await chrome.runtime.sendMessage({
@@ -447,22 +602,69 @@
         transcript: transcriptData,
         title: metadata.title,
         channel: metadata.channel,
-        url: metadata.url
+        url: metadata.url,
+        requestId: requestId
       });
 
+      cleanupLoading();
       loadingPopup.remove();
+
+      if (response && response.cancelled) {
+        // Request was cancelled, do nothing
+        return;
+      }
 
       if (response && response.summary) {
         showSummaryPopup(response.summary, metadata);
+      } else if (response && response.error) {
+        showErrorPopup(response.error);
       } else {
-        alert('Failed to generate summary. Please check your OpenAI API key configuration.');
+        showErrorPopup('Failed to generate summary. Please check your OpenAI API key configuration.');
       }
 
     } catch (error) {
       console.error('YouTube Summary: Error generating summary:', error);
+      cleanupLoading();
       loadingPopup.remove();
-      alert('Error generating summary: ' + error.message);
+      showErrorPopup(error.message);
     }
+  }
+
+  // Show error popup instead of alert
+  function showErrorPopup(errorMessage) {
+    const popup = document.createElement('div');
+    popup.id = 'youtube-summary-popup';
+    popup.innerHTML = `
+      <div class="popup-overlay">
+        <div class="popup-content error-popup">
+          <div class="popup-header">
+            <h2>Erreur</h2>
+            <button class="close-btn">&times;</button>
+          </div>
+          <div class="popup-body">
+            <div class="error-icon">⚠️</div>
+            <p class="error-message">${errorMessage}</p>
+            <button class="retry-btn">Réessayer</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(popup);
+
+    const closeBtn = popup.querySelector('.close-btn');
+    closeBtn.addEventListener('click', () => popup.remove());
+
+    const retryBtn = popup.querySelector('.retry-btn');
+    retryBtn.addEventListener('click', () => {
+      popup.remove();
+      triggerSummary(true);
+    });
+
+    const overlay = popup.querySelector('.popup-overlay');
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) popup.remove();
+    });
   }
 
   // Create floating action button
