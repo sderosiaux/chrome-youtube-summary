@@ -207,8 +207,11 @@ async function generateQAExtraction({ transcript, title, channel, url }, request
       );
     }
 
-    const qaPrompt = `Tu es mon extracteur de Q&A pour les vidéos et webinars avec des intervenants.
-À partir de la transcription ci-dessous, trouve les questions posées par l'hôte ou l'intervieweur et les réponses données par le(s) invité(s).
+    const qaPrompt = `Tu es mon extracteur de Q&A pour les vidéos, qu'elles soient des interviews, webinars, conférences ou monologues éducatifs.
+À partir de la transcription ci-dessous, extrais les questions et réponses, qu'elles soient:
+- Explicites: posées par un hôte/intervieweur à un invité
+- Rhétoriques: posées par le speaker lui-même ("Qu'est-ce que X ? Laissez-moi vous expliquer...")
+- Implicites: sujets introduits puis expliqués, même sans question formelle
 
 IMPORTANT: Réponds TOUJOURS en français, peu importe la langue de la discussion.
 
@@ -219,11 +222,13 @@ Question: <paraphrase très courte de la question en français>
 
 Règles:
 - Ignore les bavardages et l'intendance (bienvenue, sponsors, café, bons de réduction, "tu m'entends ?", etc.).
+- Détecte les questions rhétoriques ("Vous vous demandez peut-être...", "La question est...", "Comment faire X ?")
+- Extrais les questions implicites: quand un concept est introduit puis expliqué, formule la question sous-jacente
 - Fusionne les questions de suivi dans la question principale quand elles restent sur le même sujet.
 - Saute les questions ou réponses répétées.
 - Utilise un langage simple et direct, pas de hype, pas de blabla.
-- S'il y a du contenu pédagogique qui n'est pas sous forme Q&A, ignore-le sauf s'il répond clairement à une question de l'hôte.
-- Si cette vidéo ne semble pas être au format interview, webinar, session Q&A ou panel, réponds: "Ce contenu ne semble pas être au format Q&A (interview, webinar, panel)."`;
+- Même pour un monologue solo, crée une structure Q&A artificielle si le contenu s'y prête (enseignement, explication de concepts)
+- Seulement si le contenu est vraiment narratif sans aucune structure pédagogique, réponds: "Ce contenu est purement narratif, sans structure Q&A adaptable."`;
 
     const prompt = `
 ${qaPrompt}
