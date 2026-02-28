@@ -52,27 +52,36 @@
         await new Promise(resolve => setTimeout(resolve, 1500));
       }
 
-      // Try to extract from segments container
-      const segmentsContainer = document.querySelector('#segments-container');
-      if (segmentsContainer) {
-        console.log('YouTube Summary: Found segments container');
-        const segments = segmentsContainer.querySelectorAll('[data-text]');
-        if (segments.length > 0) {
-          const transcript = Array.from(segments)
-            .map(segment => segment.getAttribute('data-text') || segment.textContent)
-            .join(' ')
-            .trim();
-          return transcript;
+      // Try multiple selectors for transcript segments (YouTube changes DOM frequently)
+      const selectors = [
+        { container: '#segments-container', segments: '[data-text]', getText: el => el.getAttribute('data-text') || el.textContent },
+        { container: 'ytd-transcript-segment-list-renderer', segments: 'ytd-transcript-segment-renderer', getText: el => {
+          const seg = el.querySelector('.segment-text, yt-formatted-string.segment-text');
+          return seg ? seg.textContent : el.textContent.replace(/^\s*\d+:\d+\s*/, '');
+        }},
+        { container: 'ytd-transcript-renderer', segments: 'yt-formatted-string.segment-text', getText: el => el.textContent },
+      ];
+
+      for (const { container, segments, getText } of selectors) {
+        const containerEl = document.querySelector(container);
+        if (!containerEl) continue;
+        console.log('YouTube Summary: Found container:', container);
+
+        const segmentEls = containerEl.querySelectorAll(segments);
+        console.log('YouTube Summary: Found', segmentEls.length, 'segments with:', segments);
+
+        if (segmentEls.length > 0) {
+          const transcript = Array.from(segmentEls).map(getText).filter(Boolean).join(' ').trim();
+          if (transcript.length > 50) return transcript;
         }
 
-        const transcriptText = segmentsContainer.textContent
-          .replace(/[\n\r0-9:]+/g, "")
-          .replace(/\s+/g, " ")
+        // Fallback: raw text from container
+        const rawText = containerEl.textContent
+          .replace(/\d+:\d+/g, '')
+          .replace(/\s+/g, ' ')
           .trim();
-
-        if (transcriptText.length > 50) {
-          return transcriptText;
-        }
+        console.log('YouTube Summary: Container raw text length:', rawText.length);
+        if (rawText.length > 50) return rawText;
       }
 
       return null;

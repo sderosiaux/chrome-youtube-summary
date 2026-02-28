@@ -304,14 +304,15 @@ ${transcript}
 async function fetchTranscriptInnertube(videoId) {
   console.log("YouTube Summary: [BG] Fetching transcript via innertube for:", videoId);
 
-  // Construct protobuf params: field1(field2(videoId))
-  const inner = '\x12' + String.fromCharCode(videoId.length) + videoId;
-  const outer = '\x0a' + String.fromCharCode(inner.length) + inner;
-  const params = btoa(outer);
+  // Protobuf encoding matching YouTube's real format:
+  // field 2 (string): videoId, field 4 (varint): 508, field 5 (varint): 1
+  const params = btoa('\x12' + String.fromCharCode(videoId.length) + videoId + '\x20\xfc\x03\x28\x01');
+  console.log("YouTube Summary: [BG] Params:", params);
 
-  const response = await fetch('https://www.youtube.com/youtubei/v1/get_transcript?prettyPrint=false', {
+  const response = await fetch('https://www.youtube.com/youtubei/v1/get_transcript?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8&prettyPrint=false', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
     body: JSON.stringify({
       context: {
         client: {
