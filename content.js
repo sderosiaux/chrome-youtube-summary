@@ -83,93 +83,157 @@
   }
 
   // Get caption tracks by reading <script> tags from the DOM (no fetch, no injection)
-  function getCaptionTracksFromPage() {
-    try {
-      const scripts = document.querySelectorAll('script');
-      for (const script of scripts) {
-        const text = script.textContent;
-        const marker = '"captionTracks":';
-        const startIdx = text.indexOf(marker);
-        if (startIdx === -1) continue;
+  function getCaptionTracksFromDOM() {
+    const videoId = new URLSearchParams(location.search).get('v');
+    console.log('YouTube Summary: [DOM] Searching script tags for captionTracks, videoId:', videoId);
 
-        const arrayStart = startIdx + marker.length;
-        let depth = 0;
-        let endIdx = arrayStart;
-        for (let i = arrayStart; i < text.length; i++) {
-          if (text[i] === '[') depth++;
-          if (text[i] === ']') depth--;
-          if (depth === 0) { endIdx = i + 1; break; }
-        }
+    const scripts = document.querySelectorAll('script');
+    console.log('YouTube Summary: [DOM] Found', scripts.length, 'script tags');
 
-        const tracks = JSON.parse(text.substring(arrayStart, endIdx));
-        if (tracks.length > 0) return tracks;
+    for (const script of scripts) {
+      const text = script.textContent;
+      const marker = '"captionTracks":';
+      const startIdx = text.indexOf(marker);
+      if (startIdx === -1) continue;
+
+      console.log('YouTube Summary: [DOM] Found captionTracks marker in script tag');
+
+      // Verify this is for the current video
+      if (videoId && !text.includes(videoId)) {
+        console.log('YouTube Summary: [DOM] Script tag does not contain current videoId, skipping (stale SPA data)');
+        continue;
       }
+
+      const arrayStart = startIdx + marker.length;
+      let depth = 0;
+      let endIdx = arrayStart;
+      for (let i = arrayStart; i < text.length; i++) {
+        if (text[i] === '[') depth++;
+        if (text[i] === ']') depth--;
+        if (depth === 0) { endIdx = i + 1; break; }
+      }
+
+      const raw = text.substring(arrayStart, endIdx);
+      console.log('YouTube Summary: [DOM] Extracted JSON (' + raw.length + ' chars):', raw.substring(0, 150));
+
+      try {
+        const tracks = JSON.parse(raw);
+        console.log('YouTube Summary: [DOM] Parsed', tracks.length, 'tracks:', tracks.map(t => `${t.languageCode}(${t.kind || 'manual'})`).join(', '));
+        if (tracks.length > 0) return tracks;
+      } catch (e) {
+        console.error('YouTube Summary: [DOM] JSON parse error:', e.message, 'raw:', raw.substring(0, 100));
+      }
+    }
+    return null;
+  }
+
+  // Fallback: fetch page HTML to get caption tracks (works after SPA navigation)
+  async function getCaptionTracksFromFetch() {
+    console.log('YouTube Summary: [FETCH] Fetching page HTML for caption tracks');
+    const response = await fetch(location.href);
+    const html = await response.text();
+    console.log('YouTube Summary: [FETCH] Got', html.length, 'bytes');
+
+    const marker = '"captionTracks":';
+    const startIdx = html.indexOf(marker);
+    if (startIdx === -1) {
+      console.log('YouTube Summary: [FETCH] No captionTracks found in HTML');
       return null;
+    }
+
+    const arrayStart = startIdx + marker.length;
+    let depth = 0;
+    let endIdx = arrayStart;
+    for (let i = arrayStart; i < html.length; i++) {
+      if (html[i] === '[') depth++;
+      if (html[i] === ']') depth--;
+      if (depth === 0) { endIdx = i + 1; break; }
+    }
+
+    const raw = html.substring(arrayStart, endIdx);
+    console.log('YouTube Summary: [FETCH] Extracted JSON (' + raw.length + ' chars):', raw.substring(0, 150));
+
+    const tracks = JSON.parse(raw);
+    console.log('YouTube Summary: [FETCH] Parsed', tracks.length, 'tracks:', tracks.map(t => `${t.languageCode}(${t.kind || 'manual'})`).join(', '));
+    return tracks.length > 0 ? tracks : null;
+  }
+
+  // Get caption tracks: try DOM first, fallback to fetch
+  async function getCaptionTracksFromPage() {
+    try {
+      const tracks = getCaptionTracksFromDOM();
+      if (tracks) return tracks;
+      console.log('YouTube Summary: [DOM] No tracks found, falling back to fetch');
+      return await getCaptionTracksFromFetch();
     } catch (error) {
-      console.error('YouTube Summary: Error parsing caption tracks from DOM:', error);
+      console.error('YouTube Summary: Error getting caption tracks:', error);
       return null;
     }
   }
 
   // Fetch and parse transcript from a caption track URL (handles XML and JSON3 formats)
   async function fetchTranscriptFromUrl(baseUrl) {
+    console.log('YouTube Summary: [TRANSCRIPT] Fetching URL:', baseUrl.substring(0, 120) + '...');
+
     const response = await fetch(baseUrl);
-    if (!response.ok) {
-      console.error('YouTube Summary: Caption fetch failed:', response.status, response.statusText);
-      return null;
-    }
+    console.log('YouTube Summary: [TRANSCRIPT] Response status:', response.status, response.statusText);
+    if (!response.ok) return null;
 
     const body = await response.text();
-    console.log('YouTube Summary: Caption response format:', body.substring(0, 100));
+    console.log('YouTube Summary: [TRANSCRIPT] Body length:', body.length, 'starts with:', body.substring(0, 150));
 
-    // Try JSON3 format first (YouTube's newer format for ASR captions)
+    // Try JSON3 format (YouTube's newer format for ASR captions)
     if (body.startsWith('{')) {
       try {
         const json = JSON.parse(body);
+        console.log('YouTube Summary: [TRANSCRIPT] JSON3 format, keys:', Object.keys(json).join(', '), 'events:', (json.events || []).length);
         const segments = (json.events || [])
           .filter(e => e.segs)
           .flatMap(e => e.segs.map(s => s.utf8))
           .filter(Boolean);
+        console.log('YouTube Summary: [TRANSCRIPT] JSON3 segments:', segments.length, 'first:', segments.slice(0, 3).join('|'));
         if (segments.length > 0) {
           const transcript = segments.join('').replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+          console.log('YouTube Summary: [TRANSCRIPT] JSON3 transcript length:', transcript.length);
           return transcript.length > 50 ? transcript : null;
         }
       } catch (e) {
-        console.error('YouTube Summary: JSON3 parse error:', e);
+        console.error('YouTube Summary: [TRANSCRIPT] JSON3 parse error:', e);
       }
     }
 
     // Try XML format
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(body, 'text/xml');
-    const textNodes = doc.querySelectorAll('text');
+    if (body.startsWith('<?xml') || body.startsWith('<transcript') || body.startsWith('<timedtext')) {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(body, 'text/xml');
+      const textNodes = doc.querySelectorAll('text');
+      console.log('YouTube Summary: [TRANSCRIPT] XML format, text nodes:', textNodes.length);
 
-    if (textNodes.length > 0) {
-      const transcript = Array.from(textNodes)
-        .map(node => {
-          const temp = document.createElement('span');
-          temp.innerHTML = node.textContent;
-          return temp.textContent;
-        })
-        .join(' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-      return transcript.length > 50 ? transcript : null;
+      if (textNodes.length > 0) {
+        const transcript = Array.from(textNodes)
+          .map(node => {
+            const temp = document.createElement('span');
+            temp.innerHTML = node.textContent;
+            return temp.textContent;
+          })
+          .join(' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+        console.log('YouTube Summary: [TRANSCRIPT] XML transcript length:', transcript.length);
+        return transcript.length > 50 ? transcript : null;
+      }
     }
 
-    console.error('YouTube Summary: Unknown caption format, body starts with:', body.substring(0, 200));
+    console.error('YouTube Summary: [TRANSCRIPT] Unrecognized format. Full body:', body.substring(0, 500));
     return null;
   }
 
   // Pick the best caption track (prefer original language, then English, then first)
   function pickBestTrack(tracks) {
-    // Prefer a non-auto-generated track in original language
     const original = tracks.find(t => t.kind !== 'asr');
     if (original) return original;
-    // Then any English track
     const english = tracks.find(t => t.languageCode === 'en');
     if (english) return english;
-    // Then first available
     return tracks[0];
   }
 
@@ -187,7 +251,7 @@
       console.log(`YouTube Summary: Found ${tracks.length} caption track(s)`);
       const track = pickBestTrack(tracks);
       if (!track || !track.baseUrl) {
-        console.log('YouTube Summary: No usable caption track');
+        console.log('YouTube Summary: No usable caption track, track:', JSON.stringify(track));
         return null;
       }
 
