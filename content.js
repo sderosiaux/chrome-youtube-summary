@@ -25,6 +25,15 @@
     });
   }
 
+  // Expand the video description (transcript button may be hidden inside)
+  async function expandDescription() {
+    const expander = document.querySelector('ytd-watch-metadata tp-yt-paper-button#expand');
+    if (expander && expander.offsetHeight > 0) {
+      expander.click();
+      await new Promise(r => setTimeout(r, 300));
+    }
+  }
+
   // Click the transcript button to open the panel
   async function openTranscriptPanel() {
     const buttonSelectors = [
@@ -33,21 +42,38 @@
       '[aria-label*="transcript" i]',
       '[aria-label*="transcription" i]',
     ];
+
+    // Try to find a visible button first
     for (const sel of buttonSelectors) {
       const btn = document.querySelector(sel);
-      if (btn) { btn.click(); return true; }
+      if (btn && btn.offsetHeight > 0) { btn.click(); return true; }
     }
+
+    // Button may be hidden inside collapsed description — expand and retry
+    await expandDescription();
+    for (const sel of buttonSelectors) {
+      const btn = document.querySelector(sel);
+      if (btn && btn.offsetHeight > 0) { btn.click(); return true; }
+    }
+
     return false;
   }
 
-  // Wait for the transcript panel element to appear in the DOM
+  // Wait for an engagement panel with transcript data to appear
   async function waitForTranscriptPanel() {
     for (let i = 0; i < 10; i++) {
       await new Promise(r => setTimeout(r, 500));
-      const panel = document.querySelector(
+      // Check dedicated transcript panel
+      const transcriptPanel = document.querySelector(
         '[target-id="PAmodern_transcript_view"], [target-id*="transcript"]'
       );
-      if (panel?.querySelector('ytd-item-section-renderer')) return true;
+      if (transcriptPanel?.querySelector('ytd-item-section-renderer')) return true;
+      // Also check any expanded engagement panel (chapters+transcript combo)
+      const allPanels = document.querySelectorAll('ytd-engagement-panel-section-list-renderer');
+      for (const p of allPanels) {
+        if (p.getAttribute('visibility') === 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED' &&
+            p.querySelector('ytd-item-section-renderer')) return true;
+      }
     }
     return false;
   }
@@ -190,6 +216,7 @@
           <div class="popup-tabs">
             <button class="tab-btn active" data-tab="summary">Résumé</button>
             <button class="tab-btn" data-tab="qa">Q&A</button>
+            <button class="tab-btn" data-tab="transcript">Transcript</button>
           </div>
           <div class="popup-body">
             <div class="summary-content">
@@ -255,13 +282,23 @@
         btn.classList.add('active');
 
         if (tab === 'summary') {
+          regenerateBtn.style.display = '';
           initializeMarkdownPreview(currentSummary);
         } else if (tab === 'qa') {
+          regenerateBtn.style.display = '';
           if (currentQA) {
             initializeMarkdownPreview(currentQA);
           } else {
-            // Generate Q&A if not already generated
             await generateQAContent();
+          }
+        } else if (tab === 'transcript') {
+          regenerateBtn.style.display = 'none';
+          const previewDiv = document.querySelector('.markdown-preview');
+          if (previewDiv) {
+            previewDiv.innerHTML = `<pre class="transcript-raw">${(transcriptData || 'Aucune transcription disponible.').replace(/</g, '&lt;')}</pre>`;
+            previewDiv.style.padding = '24px';
+            previewDiv.style.flex = '1';
+            previewDiv.style.overflowY = 'auto';
           }
         }
       });
@@ -269,7 +306,7 @@
 
     copyBtn.addEventListener('click', () => {
       const activeTab = popup.querySelector('.tab-btn.active').dataset.tab;
-      const contentToCopy = activeTab === 'summary' ? currentSummary : currentQA;
+      const contentToCopy = activeTab === 'summary' ? currentSummary : activeTab === 'qa' ? currentQA : transcriptData;
       navigator.clipboard.writeText(contentToCopy || '').then(() => {
         copyBtn.textContent = 'Copié!';
         setTimeout(() => copyBtn.textContent = 'Copier', 2000);

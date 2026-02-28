@@ -309,15 +309,32 @@ async function extractTranscriptFromMainWorld(tabId) {
     target: { tabId },
     world: 'MAIN',
     func: () => {
-      const panel = document.querySelector(
+      // Find engagement panel with transcript data:
+      // 1) Dedicated transcript panel (videos without chapters)
+      // 2) Any expanded panel (videos with chapters use a combo panel with no target-id)
+      let panel = document.querySelector(
         '[target-id="PAmodern_transcript_view"], [target-id*="transcript"]'
       );
-      const section = panel?.querySelector('ytd-item-section-renderer');
-      const contents = section?.data?.contents;
-      if (!contents || contents.length === 0) return { error: 'no contents', contentsLength: 0 };
+      if (!panel?.querySelector('ytd-item-section-renderer')) {
+        const allPanels = document.querySelectorAll('ytd-engagement-panel-section-list-renderer');
+        panel = Array.from(allPanels).find(p =>
+          p.getAttribute('visibility') === 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED' &&
+          p.querySelector('ytd-item-section-renderer')
+        );
+      }
+      if (!panel) return { error: 'no panel found' };
+
+      // Collect from ALL sections (chapters = multiple ytd-item-section-renderer)
+      const sections = panel.querySelectorAll('ytd-item-section-renderer');
+      const allContents = [];
+      for (const section of sections) {
+        const contents = section.data?.contents;
+        if (contents) allContents.push(...contents);
+      }
+      if (allContents.length === 0) return { error: 'no contents', sectionsFound: sections.length };
 
       // Modern format: macroMarkersPanelItemViewModel
-      const texts = contents.map(item => {
+      const texts = allContents.map(item => {
         const vm = item.macroMarkersPanelItemViewModel?.item?.timelineItemViewModel;
         if (!vm?.contentItems) return null;
         return vm.contentItems
@@ -331,7 +348,7 @@ async function extractTranscriptFromMainWorld(tabId) {
       }
 
       // Older format: transcriptSegmentRenderer
-      const textsOld = contents.map(item => {
+      const textsOld = allContents.map(item => {
         const seg = item.transcriptSegmentRenderer;
         if (!seg?.snippet) return null;
         if (seg.snippet.runs) return seg.snippet.runs.map(r => r.text).join('');
@@ -342,7 +359,7 @@ async function extractTranscriptFromMainWorld(tabId) {
         return { transcript: textsOld.join(' ').replace(/\s+/g, ' ').trim(), segments: textsOld.length };
       }
 
-      return { error: 'unknown structure', firstKey: Object.keys(contents[0])[0] };
+      return { error: 'unknown structure', firstKey: Object.keys(allContents[0])[0] };
     }
   });
 
