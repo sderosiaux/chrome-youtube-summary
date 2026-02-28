@@ -25,86 +25,31 @@
     });
   }
 
-  // Open the transcript panel and extract data from the component's internal state.
-  // YouTube loads all segments into the component data but only renders visible ones (virtual scroll).
-  // We read the full data directly from the Polymer/Lit component, bypassing virtual scroll limits.
-  async function extractTranscriptFromPanel() {
-    try {
-      console.log('YouTube Summary: Opening transcript panel');
-
-      // Click the transcript button
-      const buttonSelectors = [
-        '[aria-label="Show transcript"]',
-        '[aria-label="Afficher la transcription"]',
-        '[aria-label*="transcript" i]',
-        '[aria-label*="transcription" i]',
-      ];
-      let clicked = false;
-      for (const sel of buttonSelectors) {
-        const btn = document.querySelector(sel);
-        if (btn) { btn.click(); clicked = true; break; }
-      }
-      if (!clicked) {
-        console.log('YouTube Summary: No transcript button found');
-        return null;
-      }
-
-      // Wait for panel data to load
-      let contents = null;
-      for (let attempt = 0; attempt < 10; attempt++) {
-        await new Promise(r => setTimeout(r, 500));
-        const panel = document.querySelector(
-          '[target-id="PAmodern_transcript_view"], [target-id*="transcript"]'
-        );
-        const section = panel?.querySelector('ytd-item-section-renderer');
-        contents = section?.data?.contents;
-        if (contents?.length > 0) break;
-      }
-
-      if (!contents || contents.length === 0) {
-        console.log('YouTube Summary: Transcript panel loaded but no contents found');
-        return null;
-      }
-
-      console.log('YouTube Summary: Found', contents.length, 'transcript segments in component data');
-
-      // Extract text from modern YouTube transcript structure:
-      // macroMarkersPanelItemViewModel → timelineItemViewModel → transcriptSegmentViewModel → simpleText
-      const texts = contents.map(item => {
-        const vm = item.macroMarkersPanelItemViewModel?.item?.timelineItemViewModel;
-        if (!vm?.contentItems) return null;
-        return vm.contentItems
-          .map(ci => ci.transcriptSegmentViewModel?.simpleText)
-          .filter(Boolean)
-          .join(' ');
-      }).filter(Boolean);
-
-      if (texts.length > 0) {
-        const transcript = texts.join(' ').replace(/\s+/g, ' ').trim();
-        console.log('YouTube Summary: Extracted', texts.length, 'text segments, length:', transcript.length);
-        return transcript.length > 50 ? transcript : null;
-      }
-
-      // Fallback: try older structure (transcriptSegmentRenderer)
-      const textsOld = contents.map(item => {
-        const seg = item.transcriptSegmentRenderer;
-        if (!seg?.snippet) return null;
-        if (seg.snippet.runs) return seg.snippet.runs.map(r => r.text).join('');
-        return seg.snippet.simpleText || null;
-      }).filter(Boolean);
-
-      if (textsOld.length > 0) {
-        const transcript = textsOld.join(' ').replace(/\s+/g, ' ').trim();
-        console.log('YouTube Summary: Extracted (old format)', textsOld.length, 'segments, length:', transcript.length);
-        return transcript.length > 50 ? transcript : null;
-      }
-
-      console.log('YouTube Summary: Unknown transcript data structure, first item keys:', JSON.stringify(Object.keys(contents[0])));
-      return null;
-    } catch (error) {
-      console.error('YouTube Summary: Error extracting transcript from panel:', error);
-      return null;
+  // Click the transcript button to open the panel
+  async function openTranscriptPanel() {
+    const buttonSelectors = [
+      '[aria-label="Show transcript"]',
+      '[aria-label="Afficher la transcription"]',
+      '[aria-label*="transcript" i]',
+      '[aria-label*="transcription" i]',
+    ];
+    for (const sel of buttonSelectors) {
+      const btn = document.querySelector(sel);
+      if (btn) { btn.click(); return true; }
     }
+    return false;
+  }
+
+  // Wait for the transcript panel element to appear in the DOM
+  async function waitForTranscriptPanel() {
+    for (let i = 0; i < 10; i++) {
+      await new Promise(r => setTimeout(r, 500));
+      const panel = document.querySelector(
+        '[target-id="PAmodern_transcript_view"], [target-id*="transcript"]'
+      );
+      if (panel?.querySelector('ytd-item-section-renderer')) return true;
+    }
+    return false;
   }
 
   // Main transcript extraction function
@@ -112,14 +57,31 @@
     console.log('YouTube Summary: Starting transcript extraction');
     await waitForVideoElement();
 
-    const transcript = await extractTranscriptFromPanel();
-    if (transcript && transcript.length > 50) {
-      transcriptData = transcript;
-      console.log('YouTube Summary: Transcript extracted successfully,', transcript.length, 'chars');
-      return transcript;
+    // Step 1: Open the transcript panel
+    console.log('YouTube Summary: Opening transcript panel');
+    const clicked = await openTranscriptPanel();
+    if (!clicked) {
+      console.log('YouTube Summary: No transcript button found');
+      return null;
     }
 
-    console.log('YouTube Summary: No transcript found');
+    // Step 2: Wait for the panel DOM to appear
+    const panelReady = await waitForTranscriptPanel();
+    if (!panelReady) {
+      console.log('YouTube Summary: Transcript panel did not appear');
+      return null;
+    }
+
+    // Step 3: Extract data via background script (needs MAIN world to access component data)
+    console.log('YouTube Summary: Panel ready, extracting data via MAIN world');
+    const result = await chrome.runtime.sendMessage({ action: 'extractTranscriptData' });
+    if (result?.transcript && result.transcript.length > 50) {
+      transcriptData = result.transcript;
+      console.log('YouTube Summary: Transcript extracted,', result.transcript.length, 'chars');
+      return result.transcript;
+    }
+
+    console.log('YouTube Summary: No transcript found. Result:', JSON.stringify(result));
     return null;
   }
 

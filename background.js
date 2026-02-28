@@ -23,11 +23,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  if (request.action === "fetchTranscript") {
-    fetchTranscriptInnertube(request.videoId)
+  if (request.action === "extractTranscriptData") {
+    extractTranscriptFromMainWorld(sender.tab.id)
       .then((transcript) => sendResponse({ transcript }))
       .catch((error) => {
-        console.error("YouTube Summary: [BG] fetchTranscript error:", error);
+        console.error("YouTube Summary: [BG] extractTranscript error:", error);
         sendResponse({ error: error.message });
       });
     return true;
@@ -300,78 +300,65 @@ ${transcript}
   }
 }
 
-// Fetch transcript via YouTube innertube API (same API the transcript panel uses)
-async function fetchTranscriptInnertube(videoId) {
-  console.log("YouTube Summary: [BG] Fetching transcript via innertube for:", videoId);
+// Extract transcript by running code in the page's MAIN world via chrome.scripting
+// This bypasses the content script's isolated world limitation to access Polymer component data
+async function extractTranscriptFromMainWorld(tabId) {
+  console.log("YouTube Summary: [BG] Extracting transcript via MAIN world for tab:", tabId);
 
-  // Protobuf encoding matching YouTube's real format:
-  // field 2 (string): videoId, field 4 (varint): 508, field 5 (varint): 1
-  const params = btoa('\x12' + String.fromCharCode(videoId.length) + videoId + '\x20\xfc\x03\x28\x01');
-  console.log("YouTube Summary: [BG] Params:", params);
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    world: 'MAIN',
+    func: () => {
+      const panel = document.querySelector(
+        '[target-id="PAmodern_transcript_view"], [target-id*="transcript"]'
+      );
+      const section = panel?.querySelector('ytd-item-section-renderer');
+      const contents = section?.data?.contents;
+      if (!contents || contents.length === 0) return { error: 'no contents', contentsLength: 0 };
 
-  const response = await fetch('https://www.youtube.com/youtubei/v1/get_transcript?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8&prettyPrint=false', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify({
-      context: {
-        client: {
-          clientName: 'WEB',
-          clientVersion: '2.20250227.00.00',
-          hl: 'fr',
-          gl: 'FR'
-        }
-      },
-      params
-    })
+      // Modern format: macroMarkersPanelItemViewModel
+      const texts = contents.map(item => {
+        const vm = item.macroMarkersPanelItemViewModel?.item?.timelineItemViewModel;
+        if (!vm?.contentItems) return null;
+        return vm.contentItems
+          .map(ci => ci.transcriptSegmentViewModel?.simpleText)
+          .filter(Boolean)
+          .join(' ');
+      }).filter(Boolean);
+
+      if (texts.length > 0) {
+        return { transcript: texts.join(' ').replace(/\s+/g, ' ').trim(), segments: texts.length };
+      }
+
+      // Older format: transcriptSegmentRenderer
+      const textsOld = contents.map(item => {
+        const seg = item.transcriptSegmentRenderer;
+        if (!seg?.snippet) return null;
+        if (seg.snippet.runs) return seg.snippet.runs.map(r => r.text).join('');
+        return seg.snippet.simpleText || null;
+      }).filter(Boolean);
+
+      if (textsOld.length > 0) {
+        return { transcript: textsOld.join(' ').replace(/\s+/g, ' ').trim(), segments: textsOld.length };
+      }
+
+      return { error: 'unknown structure', firstKey: Object.keys(contents[0])[0] };
+    }
   });
 
-  console.log("YouTube Summary: [BG] Innertube response status:", response.status);
-  if (!response.ok) {
-    const err = await response.text();
-    console.error("YouTube Summary: [BG] Innertube error:", err.substring(0, 300));
+  const result = results?.[0]?.result;
+  if (!result) {
+    console.error("YouTube Summary: [BG] No result from MAIN world script");
     return null;
   }
 
-  const data = await response.json();
-
-  // Navigate the deeply nested response to extract cue texts
-  const actions = data.actions || [];
-  for (const action of actions) {
-    const panel = action.updateEngagementPanelAction?.content?.transcriptRenderer;
-    if (!panel) continue;
-
-    const cueGroups = panel.body?.transcriptBodyRenderer?.cueGroups || [];
-    console.log("YouTube Summary: [BG] Found", cueGroups.length, "cue groups");
-
-    const lines = cueGroups.map(group => {
-      const cue = group.transcriptCueGroupRenderer?.cues?.[0]?.transcriptCueRenderer?.cue;
-      return cue?.simpleText || cue?.runs?.map(r => r.text).join('') || '';
-    }).filter(Boolean);
-
-    if (lines.length > 0) {
-      const transcript = lines.join(' ').replace(/\s+/g, ' ').trim();
-      console.log("YouTube Summary: [BG] Transcript length:", transcript.length, "first 100:", transcript.substring(0, 100));
-      return transcript;
-    }
+  if (result.error) {
+    console.error("YouTube Summary: [BG] MAIN world extraction failed:", result.error, result.firstKey);
+    return null;
   }
 
-  // Fallback: try initialSegments path
-  const renderer = data.actions?.[0]?.updateEngagementPanelAction?.content?.transcriptRenderer;
-  const segments = renderer?.body?.transcriptBodyRenderer?.initialSegments || [];
-  if (segments.length > 0) {
-    const lines = segments.map(s => {
-      const cue = s.transcriptSectionHeaderRenderer || s.transcriptSegmentRenderer;
-      return cue?.snippet?.runs?.map(r => r.text).join('') || '';
-    }).filter(Boolean);
-    const transcript = lines.join(' ').replace(/\s+/g, ' ').trim();
-    console.log("YouTube Summary: [BG] Transcript (segments path) length:", transcript.length);
-    return transcript;
-  }
-
-  console.error("YouTube Summary: [BG] Could not extract transcript from innertube response, keys:", JSON.stringify(Object.keys(data)));
-  console.log("YouTube Summary: [BG] Response preview:", JSON.stringify(data).substring(0, 500));
-  return null;
+  console.log("YouTube Summary: [BG] Extracted", result.segments, "segments,", result.transcript.length, "chars");
+  return result.transcript;
 }
 
 // Handle extension icon click
