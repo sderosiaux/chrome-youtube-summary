@@ -30,11 +30,14 @@
     try {
       console.log('YouTube Summary: Attempting DOM transcript extraction');
 
-      // First, try to find and click the transcript button
+      // Try to find and click the transcript button (language-agnostic selectors)
       const transcriptButtons = [
         '[aria-label="Show transcript"]',
-        '[aria-label*="transcript"]',
-        'button[aria-label*="Transcript"]'
+        '[aria-label="Afficher la transcription"]',
+        '[aria-label*="transcript" i]',
+        '[aria-label*="transcription" i]',
+        'button[aria-label*="Transcript" i]',
+        'button[aria-label*="Transcription" i]'
       ];
 
       let transcriptButton = null;
@@ -46,8 +49,6 @@
       if (transcriptButton) {
         console.log('YouTube Summary: Found transcript button, clicking...');
         transcriptButton.click();
-
-        // Wait for transcript panel to appear
         await new Promise(resolve => setTimeout(resolve, 1500));
       }
 
@@ -64,7 +65,6 @@
           return transcript;
         }
 
-        // Fallback to text content
         const transcriptText = segmentsContainer.textContent
           .replace(/[\n\r0-9:]+/g, "")
           .replace(/\s+/g, " ")
@@ -82,71 +82,113 @@
     }
   }
 
-  // Extract transcript using ytInitialPlayerResponse
-  async function extractTranscriptFromPlayerResponse() {
+  // Get caption tracks from YouTube page context
+  function getCaptionTracksFromPage() {
+    return new Promise((resolve) => {
+      const script = document.createElement('script');
+      script.textContent = `
+        try {
+          // Try movie_player API first (works after SPA navigation)
+          let captions = null;
+          const player = document.querySelector('#movie_player');
+          if (player && player.getPlayerResponse) {
+            const resp = player.getPlayerResponse();
+            if (resp && resp.captions) captions = resp.captions;
+          }
+          // Fallback to ytInitialPlayerResponse (works on initial page load)
+          if (!captions && window.ytInitialPlayerResponse && window.ytInitialPlayerResponse.captions) {
+            captions = window.ytInitialPlayerResponse.captions;
+          }
+          window.postMessage({ type: 'YT_CAPTION_TRACKS', data: captions }, '*');
+        } catch (e) {
+          window.postMessage({ type: 'YT_CAPTION_TRACKS', data: null }, '*');
+        }
+      `;
+
+      const handler = (event) => {
+        if (event.data && event.data.type === 'YT_CAPTION_TRACKS') {
+          window.removeEventListener('message', handler);
+          if (document.head.contains(script)) document.head.removeChild(script);
+
+          const captions = event.data.data;
+          if (captions && captions.playerCaptionsTracklistRenderer) {
+            const tracks = captions.playerCaptionsTracklistRenderer.captionTracks;
+            resolve(tracks && tracks.length > 0 ? tracks : null);
+          } else {
+            resolve(null);
+          }
+        }
+      };
+
+      window.addEventListener('message', handler);
+      document.head.appendChild(script);
+
+      setTimeout(() => {
+        window.removeEventListener('message', handler);
+        if (document.head.contains(script)) document.head.removeChild(script);
+        resolve(null);
+      }, 3000);
+    });
+  }
+
+  // Fetch and parse transcript XML from a caption track URL
+  async function fetchTranscriptFromUrl(baseUrl) {
+    const response = await fetch(baseUrl);
+    const xml = await response.text();
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(xml, 'text/xml');
+    const textNodes = doc.querySelectorAll('text');
+
+    if (textNodes.length === 0) return null;
+
+    const transcript = Array.from(textNodes)
+      .map(node => {
+        // Decode HTML entities in the text content
+        const temp = document.createElement('span');
+        temp.innerHTML = node.textContent;
+        return temp.textContent;
+      })
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    return transcript.length > 50 ? transcript : null;
+  }
+
+  // Pick the best caption track (prefer original language, then English, then first)
+  function pickBestTrack(tracks) {
+    // Prefer a non-auto-generated track in original language
+    const original = tracks.find(t => t.kind !== 'asr');
+    if (original) return original;
+    // Then any English track
+    const english = tracks.find(t => t.languageCode === 'en');
+    if (english) return english;
+    // Then first available
+    return tracks[0];
+  }
+
+  // Extract transcript by fetching caption track content
+  async function extractTranscriptFromCaptionTracks() {
     try {
-      console.log('YouTube Summary: Attempting player response transcript extraction');
+      console.log('YouTube Summary: Attempting caption tracks extraction');
 
-      // Inject script to access window context
-      return new Promise((resolve) => {
-        const script = document.createElement('script');
-        script.textContent = `
-          try {
-            const playerResponse = window.ytInitialPlayerResponse;
-            if (playerResponse && playerResponse.captions) {
-              window.postMessage({
-                type: 'YT_PLAYER_RESPONSE',
-                data: playerResponse.captions
-              }, '*');
-            } else {
-              window.postMessage({
-                type: 'YT_PLAYER_RESPONSE',
-                data: null
-              }, '*');
-            }
-          } catch (e) {
-            window.postMessage({
-              type: 'YT_PLAYER_RESPONSE',
-              data: null
-            }, '*');
-          }
-        `;
+      const tracks = await getCaptionTracksFromPage();
+      if (!tracks) {
+        console.log('YouTube Summary: No caption tracks found');
+        return null;
+      }
 
-        const messageHandler = (event) => {
-          if (event.data.type === 'YT_PLAYER_RESPONSE') {
-            window.removeEventListener('message', messageHandler);
-            document.head.removeChild(script);
+      console.log(`YouTube Summary: Found ${tracks.length} caption track(s)`);
+      const track = pickBestTrack(tracks);
+      if (!track || !track.baseUrl) {
+        console.log('YouTube Summary: No usable caption track');
+        return null;
+      }
 
-            const captionsData = event.data.data;
-            if (captionsData && captionsData.playerCaptionsTracklistRenderer) {
-              const captionTracks = captionsData.playerCaptionsTracklistRenderer.captionTracks;
-              if (captionTracks && captionTracks.length > 0) {
-                // For now, we'll resolve with the caption track info
-                // In a full implementation, you'd need a backend to fetch the actual transcript
-                resolve({ hasCaptions: true, tracks: captionTracks });
-              } else {
-                resolve(null);
-              }
-            } else {
-              resolve(null);
-            }
-          }
-        };
-
-        window.addEventListener('message', messageHandler);
-        document.head.appendChild(script);
-
-        // Timeout after 3 seconds
-        setTimeout(() => {
-          window.removeEventListener('message', messageHandler);
-          if (document.head.contains(script)) {
-            document.head.removeChild(script);
-          }
-          resolve(null);
-        }, 3000);
-      });
+      console.log(`YouTube Summary: Fetching transcript from track: ${track.languageCode} (kind: ${track.kind || 'manual'})`);
+      return await fetchTranscriptFromUrl(track.baseUrl);
     } catch (error) {
-      console.error('YouTube Summary: Error extracting transcript from player response:', error);
+      console.error('YouTube Summary: Error fetching caption tracks:', error);
       return null;
     }
   }
@@ -155,29 +197,27 @@
   async function extractTranscript() {
     console.log('YouTube Summary: Starting transcript extraction');
 
-    // Wait for video to be ready
     await waitForVideoElement();
 
-    // Try DOM method first
-    let transcript = await extractTranscriptFromDOM();
-
-    if (!transcript || transcript.length < 50) {
-      console.log('YouTube Summary: DOM method failed, trying player response method');
-      const playerData = await extractTranscriptFromPlayerResponse();
-
-      if (playerData && playerData.hasCaptions) {
-        transcript = 'Transcript available but requires backend processing to fetch full content.';
-      }
-    }
-
+    // Method 1: Fetch directly from YouTube caption tracks API (most reliable)
+    let transcript = await extractTranscriptFromCaptionTracks();
     if (transcript && transcript.length > 50) {
       transcriptData = transcript;
-      console.log('YouTube Summary: Transcript extracted successfully', transcript.substring(0, 100) + '...');
+      console.log('YouTube Summary: Transcript extracted via caption tracks', transcript.substring(0, 100) + '...');
       return transcript;
-    } else {
-      console.log('YouTube Summary: No transcript found');
-      return null;
     }
+
+    // Method 2: DOM scraping fallback
+    console.log('YouTube Summary: Caption tracks failed, trying DOM method');
+    transcript = await extractTranscriptFromDOM();
+    if (transcript && transcript.length > 50) {
+      transcriptData = transcript;
+      console.log('YouTube Summary: Transcript extracted via DOM', transcript.substring(0, 100) + '...');
+      return transcript;
+    }
+
+    console.log('YouTube Summary: No transcript found');
+    return null;
   }
 
   // Get video title and metadata
