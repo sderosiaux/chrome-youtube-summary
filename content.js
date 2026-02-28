@@ -25,203 +25,97 @@
     });
   }
 
-  // Extract transcript using DOM method
-  async function extractTranscriptFromDOM() {
+  // Open the transcript panel and extract data from the component's internal state.
+  // YouTube loads all segments into the component data but only renders visible ones (virtual scroll).
+  // We read the full data directly from the Polymer/Lit component, bypassing virtual scroll limits.
+  async function extractTranscriptFromPanel() {
     try {
-      console.log('YouTube Summary: Attempting DOM transcript extraction');
+      console.log('YouTube Summary: Opening transcript panel');
 
-      // Try to find and click the transcript button (language-agnostic selectors)
-      const transcriptButtons = [
+      // Click the transcript button
+      const buttonSelectors = [
         '[aria-label="Show transcript"]',
         '[aria-label="Afficher la transcription"]',
         '[aria-label*="transcript" i]',
         '[aria-label*="transcription" i]',
-        'button[aria-label*="Transcript" i]',
-        'button[aria-label*="Transcription" i]'
       ];
-
-      let transcriptButton = null;
-      for (const selector of transcriptButtons) {
-        transcriptButton = document.querySelector(selector);
-        if (transcriptButton) break;
+      let clicked = false;
+      for (const sel of buttonSelectors) {
+        const btn = document.querySelector(sel);
+        if (btn) { btn.click(); clicked = true; break; }
+      }
+      if (!clicked) {
+        console.log('YouTube Summary: No transcript button found');
+        return null;
       }
 
-      if (transcriptButton) {
-        console.log('YouTube Summary: Found transcript button, clicking...');
-        transcriptButton.click();
-        await new Promise(resolve => setTimeout(resolve, 1500));
+      // Wait for panel data to load
+      let contents = null;
+      for (let attempt = 0; attempt < 10; attempt++) {
+        await new Promise(r => setTimeout(r, 500));
+        const panel = document.querySelector(
+          '[target-id="PAmodern_transcript_view"], [target-id*="transcript"]'
+        );
+        const section = panel?.querySelector('ytd-item-section-renderer');
+        contents = section?.data?.contents;
+        if (contents?.length > 0) break;
       }
 
-      // Try multiple selectors for transcript segments (YouTube changes DOM frequently)
-      const selectors = [
-        { container: '#segments-container', segments: '[data-text]', getText: el => el.getAttribute('data-text') || el.textContent },
-        { container: 'ytd-transcript-segment-list-renderer', segments: 'ytd-transcript-segment-renderer', getText: el => {
-          const seg = el.querySelector('.segment-text, yt-formatted-string.segment-text');
-          return seg ? seg.textContent : el.textContent.replace(/^\s*\d+:\d+\s*/, '');
-        }},
-        { container: 'ytd-transcript-renderer', segments: 'yt-formatted-string.segment-text', getText: el => el.textContent },
-      ];
-
-      for (const { container, segments, getText } of selectors) {
-        const containerEl = document.querySelector(container);
-        if (!containerEl) continue;
-        console.log('YouTube Summary: Found container:', container);
-
-        const segmentEls = containerEl.querySelectorAll(segments);
-        console.log('YouTube Summary: Found', segmentEls.length, 'segments with:', segments);
-
-        if (segmentEls.length > 0) {
-          const transcript = Array.from(segmentEls).map(getText).filter(Boolean).join(' ').trim();
-          if (transcript.length > 50) return transcript;
-        }
-
-        // Fallback: raw text from container
-        const rawText = containerEl.textContent
-          .replace(/\d+:\d+/g, '')
-          .replace(/\s+/g, ' ')
-          .trim();
-        console.log('YouTube Summary: Container raw text length:', rawText.length);
-        if (rawText.length > 50) return rawText;
+      if (!contents || contents.length === 0) {
+        console.log('YouTube Summary: Transcript panel loaded but no contents found');
+        return null;
       }
 
+      console.log('YouTube Summary: Found', contents.length, 'transcript segments in component data');
+
+      // Extract text from modern YouTube transcript structure:
+      // macroMarkersPanelItemViewModel → timelineItemViewModel → transcriptSegmentViewModel → simpleText
+      const texts = contents.map(item => {
+        const vm = item.macroMarkersPanelItemViewModel?.item?.timelineItemViewModel;
+        if (!vm?.contentItems) return null;
+        return vm.contentItems
+          .map(ci => ci.transcriptSegmentViewModel?.simpleText)
+          .filter(Boolean)
+          .join(' ');
+      }).filter(Boolean);
+
+      if (texts.length > 0) {
+        const transcript = texts.join(' ').replace(/\s+/g, ' ').trim();
+        console.log('YouTube Summary: Extracted', texts.length, 'text segments, length:', transcript.length);
+        return transcript.length > 50 ? transcript : null;
+      }
+
+      // Fallback: try older structure (transcriptSegmentRenderer)
+      const textsOld = contents.map(item => {
+        const seg = item.transcriptSegmentRenderer;
+        if (!seg?.snippet) return null;
+        if (seg.snippet.runs) return seg.snippet.runs.map(r => r.text).join('');
+        return seg.snippet.simpleText || null;
+      }).filter(Boolean);
+
+      if (textsOld.length > 0) {
+        const transcript = textsOld.join(' ').replace(/\s+/g, ' ').trim();
+        console.log('YouTube Summary: Extracted (old format)', textsOld.length, 'segments, length:', transcript.length);
+        return transcript.length > 50 ? transcript : null;
+      }
+
+      console.log('YouTube Summary: Unknown transcript data structure, first item keys:', JSON.stringify(Object.keys(contents[0])));
       return null;
     } catch (error) {
-      console.error('YouTube Summary: Error extracting transcript from DOM:', error);
+      console.error('YouTube Summary: Error extracting transcript from panel:', error);
       return null;
     }
-  }
-
-  // Get caption tracks by reading <script> tags from the DOM (no fetch, no injection)
-  function getCaptionTracksFromDOM() {
-    const videoId = new URLSearchParams(location.search).get('v');
-    console.log('YouTube Summary: [DOM] Searching script tags for captionTracks, videoId:', videoId);
-
-    const scripts = document.querySelectorAll('script');
-    console.log('YouTube Summary: [DOM] Found', scripts.length, 'script tags');
-
-    for (const script of scripts) {
-      const text = script.textContent;
-      const marker = '"captionTracks":';
-      const startIdx = text.indexOf(marker);
-      if (startIdx === -1) continue;
-
-      console.log('YouTube Summary: [DOM] Found captionTracks marker in script tag');
-
-      // Verify this is for the current video
-      if (videoId && !text.includes(videoId)) {
-        console.log('YouTube Summary: [DOM] Script tag does not contain current videoId, skipping (stale SPA data)');
-        continue;
-      }
-
-      const arrayStart = startIdx + marker.length;
-      let depth = 0;
-      let endIdx = arrayStart;
-      for (let i = arrayStart; i < text.length; i++) {
-        if (text[i] === '[') depth++;
-        if (text[i] === ']') depth--;
-        if (depth === 0) { endIdx = i + 1; break; }
-      }
-
-      const raw = text.substring(arrayStart, endIdx);
-      console.log('YouTube Summary: [DOM] Extracted JSON (' + raw.length + ' chars):', raw.substring(0, 150));
-
-      try {
-        const tracks = JSON.parse(raw);
-        console.log('YouTube Summary: [DOM] Parsed', tracks.length, 'tracks:', tracks.map(t => `${t.languageCode}(${t.kind || 'manual'})`).join(', '));
-        if (tracks.length > 0) return tracks;
-      } catch (e) {
-        console.error('YouTube Summary: [DOM] JSON parse error:', e.message, 'raw:', raw.substring(0, 100));
-      }
-    }
-    return null;
-  }
-
-  // Fallback: fetch page HTML to get caption tracks (works after SPA navigation)
-  async function getCaptionTracksFromFetch() {
-    console.log('YouTube Summary: [FETCH] Fetching page HTML for caption tracks');
-    const response = await fetch(location.href);
-    const html = await response.text();
-    console.log('YouTube Summary: [FETCH] Got', html.length, 'bytes');
-
-    const marker = '"captionTracks":';
-    const startIdx = html.indexOf(marker);
-    if (startIdx === -1) {
-      console.log('YouTube Summary: [FETCH] No captionTracks found in HTML');
-      return null;
-    }
-
-    const arrayStart = startIdx + marker.length;
-    let depth = 0;
-    let endIdx = arrayStart;
-    for (let i = arrayStart; i < html.length; i++) {
-      if (html[i] === '[') depth++;
-      if (html[i] === ']') depth--;
-      if (depth === 0) { endIdx = i + 1; break; }
-    }
-
-    const raw = html.substring(arrayStart, endIdx);
-    console.log('YouTube Summary: [FETCH] Extracted JSON (' + raw.length + ' chars):', raw.substring(0, 150));
-
-    const tracks = JSON.parse(raw);
-    console.log('YouTube Summary: [FETCH] Parsed', tracks.length, 'tracks:', tracks.map(t => `${t.languageCode}(${t.kind || 'manual'})`).join(', '));
-    return tracks.length > 0 ? tracks : null;
-  }
-
-  // Get caption tracks: try DOM first, fallback to fetch
-  async function getCaptionTracksFromPage() {
-    try {
-      const tracks = getCaptionTracksFromDOM();
-      if (tracks) return tracks;
-      console.log('YouTube Summary: [DOM] No tracks found, falling back to fetch');
-      return await getCaptionTracksFromFetch();
-    } catch (error) {
-      console.error('YouTube Summary: Error getting caption tracks:', error);
-      return null;
-    }
-  }
-
-  // Fetch transcript via innertube API (routed through background service worker)
-  async function fetchTranscriptViaInnertube(videoId) {
-    console.log('YouTube Summary: [INNERTUBE] Requesting transcript for:', videoId);
-    const result = await chrome.runtime.sendMessage({ action: 'fetchTranscript', videoId });
-    if (result.error) {
-      console.error('YouTube Summary: [INNERTUBE] Error:', result.error);
-      return null;
-    }
-    if (result.transcript) {
-      console.log('YouTube Summary: [INNERTUBE] Got transcript, length:', result.transcript.length);
-      return result.transcript;
-    }
-    console.log('YouTube Summary: [INNERTUBE] No transcript returned');
-    return null;
   }
 
   // Main transcript extraction function
   async function extractTranscript() {
     console.log('YouTube Summary: Starting transcript extraction');
-
     await waitForVideoElement();
 
-    const videoId = new URLSearchParams(location.search).get('v');
-    if (!videoId) {
-      console.log('YouTube Summary: No video ID found');
-      return null;
-    }
-
-    // Method 1: Innertube API (same API YouTube's transcript panel uses)
-    let transcript = await fetchTranscriptViaInnertube(videoId);
+    const transcript = await extractTranscriptFromPanel();
     if (transcript && transcript.length > 50) {
       transcriptData = transcript;
-      console.log('YouTube Summary: Transcript extracted via innertube', transcript.substring(0, 100) + '...');
-      return transcript;
-    }
-
-    // Method 2: DOM scraping fallback
-    console.log('YouTube Summary: Innertube failed, trying DOM method');
-    transcript = await extractTranscriptFromDOM();
-    if (transcript && transcript.length > 50) {
-      transcriptData = transcript;
-      console.log('YouTube Summary: Transcript extracted via DOM', transcript.substring(0, 100) + '...');
+      console.log('YouTube Summary: Transcript extracted successfully,', transcript.length, 'chars');
       return transcript;
     }
 
