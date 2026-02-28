@@ -23,6 +23,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === "fetchCaptions") {
+    fetchCaptionsFromBackground(request.url)
+      .then((text) => sendResponse({ text }))
+      .catch((error) => sendResponse({ error: error.message }));
+    return true;
+  }
+
   if (request.action === "generateSummary") {
     const requestId = request.requestId || Date.now().toString();
     generateAISummary(request, requestId)
@@ -288,6 +295,15 @@ ${transcript}
     console.error("YouTube Summary: Error in generateQAExtraction:", error);
     throw error;
   }
+}
+
+// Fetch caption URL from background (has proper cookie access via host_permissions)
+async function fetchCaptionsFromBackground(url) {
+  console.log("YouTube Summary: [BG] Fetching captions:", url.substring(0, 100));
+  const response = await fetch(url, { credentials: 'include' });
+  const text = await response.text();
+  console.log("YouTube Summary: [BG] Caption response:", response.status, "length:", text.length);
+  return text;
 }
 
 // Handle extension icon click

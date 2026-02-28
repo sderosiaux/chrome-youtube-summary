@@ -173,13 +173,18 @@
 
   // Fetch and parse transcript from a caption track URL (handles XML and JSON3 formats)
   async function fetchTranscriptFromUrl(baseUrl) {
-    console.log('YouTube Summary: [TRANSCRIPT] Fetching URL:', baseUrl.substring(0, 120) + '...');
+    // Add fmt=json3 for explicit format, and try via background for proper cookie access
+    const url = baseUrl + (baseUrl.includes('fmt=') ? '' : '&fmt=json3');
+    console.log('YouTube Summary: [TRANSCRIPT] Fetching URL:', url.substring(0, 120) + '...');
 
-    const response = await fetch(baseUrl);
-    console.log('YouTube Summary: [TRANSCRIPT] Response status:', response.status, response.statusText);
-    if (!response.ok) return null;
+    // Route through background service worker (has host_permissions + cookie access)
+    const result = await chrome.runtime.sendMessage({ action: 'fetchCaptions', url });
+    if (result.error) {
+      console.error('YouTube Summary: [TRANSCRIPT] Background fetch error:', result.error);
+      return null;
+    }
 
-    const body = await response.text();
+    const body = result.text || '';
     console.log('YouTube Summary: [TRANSCRIPT] Body length:', body.length, 'starts with:', body.substring(0, 150));
 
     // Try JSON3 format (YouTube's newer format for ASR captions)
