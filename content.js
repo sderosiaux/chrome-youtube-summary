@@ -82,30 +82,31 @@
     }
   }
 
-  // Get caption tracks by fetching the page HTML (CSP-safe, no script injection)
-  async function getCaptionTracksFromPage() {
+  // Get caption tracks by reading <script> tags from the DOM (no fetch, no injection)
+  function getCaptionTracksFromPage() {
     try {
-      const response = await fetch(location.href);
-      const html = await response.text();
+      const scripts = document.querySelectorAll('script');
+      for (const script of scripts) {
+        const text = script.textContent;
+        const marker = '"captionTracks":';
+        const startIdx = text.indexOf(marker);
+        if (startIdx === -1) continue;
 
-      // Find "captionTracks":[...] in the page source and extract the JSON array
-      const marker = '"captionTracks":';
-      const startIdx = html.indexOf(marker);
-      if (startIdx === -1) return null;
+        const arrayStart = startIdx + marker.length;
+        let depth = 0;
+        let endIdx = arrayStart;
+        for (let i = arrayStart; i < text.length; i++) {
+          if (text[i] === '[') depth++;
+          if (text[i] === ']') depth--;
+          if (depth === 0) { endIdx = i + 1; break; }
+        }
 
-      const arrayStart = startIdx + marker.length;
-      let depth = 0;
-      let endIdx = arrayStart;
-      for (let i = arrayStart; i < html.length; i++) {
-        if (html[i] === '[') depth++;
-        if (html[i] === ']') depth--;
-        if (depth === 0) { endIdx = i + 1; break; }
+        const tracks = JSON.parse(text.substring(arrayStart, endIdx));
+        if (tracks.length > 0) return tracks;
       }
-
-      const tracks = JSON.parse(html.substring(arrayStart, endIdx));
-      return tracks.length > 0 ? tracks : null;
+      return null;
     } catch (error) {
-      console.error('YouTube Summary: Error parsing caption tracks from page:', error);
+      console.error('YouTube Summary: Error parsing caption tracks from DOM:', error);
       return null;
     }
   }
