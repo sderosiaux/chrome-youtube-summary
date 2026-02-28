@@ -111,28 +111,54 @@
     }
   }
 
-  // Fetch and parse transcript XML from a caption track URL
+  // Fetch and parse transcript from a caption track URL (handles XML and JSON3 formats)
   async function fetchTranscriptFromUrl(baseUrl) {
     const response = await fetch(baseUrl);
-    const xml = await response.text();
+    if (!response.ok) {
+      console.error('YouTube Summary: Caption fetch failed:', response.status, response.statusText);
+      return null;
+    }
+
+    const body = await response.text();
+    console.log('YouTube Summary: Caption response format:', body.substring(0, 100));
+
+    // Try JSON3 format first (YouTube's newer format for ASR captions)
+    if (body.startsWith('{')) {
+      try {
+        const json = JSON.parse(body);
+        const segments = (json.events || [])
+          .filter(e => e.segs)
+          .flatMap(e => e.segs.map(s => s.utf8))
+          .filter(Boolean);
+        if (segments.length > 0) {
+          const transcript = segments.join('').replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+          return transcript.length > 50 ? transcript : null;
+        }
+      } catch (e) {
+        console.error('YouTube Summary: JSON3 parse error:', e);
+      }
+    }
+
+    // Try XML format
     const parser = new DOMParser();
-    const doc = parser.parseFromString(xml, 'text/xml');
+    const doc = parser.parseFromString(body, 'text/xml');
     const textNodes = doc.querySelectorAll('text');
 
-    if (textNodes.length === 0) return null;
+    if (textNodes.length > 0) {
+      const transcript = Array.from(textNodes)
+        .map(node => {
+          const temp = document.createElement('span');
+          temp.innerHTML = node.textContent;
+          return temp.textContent;
+        })
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      return transcript.length > 50 ? transcript : null;
+    }
 
-    const transcript = Array.from(textNodes)
-      .map(node => {
-        // Decode HTML entities in the text content
-        const temp = document.createElement('span');
-        temp.innerHTML = node.textContent;
-        return temp.textContent;
-      })
-      .join(' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-
-    return transcript.length > 50 ? transcript : null;
+    console.error('YouTube Summary: Unknown caption format, body starts with:', body.substring(0, 200));
+    return null;
   }
 
   // Pick the best caption track (prefer original language, then English, then first)
