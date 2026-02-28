@@ -82,53 +82,32 @@
     }
   }
 
-  // Get caption tracks from YouTube page context
-  function getCaptionTracksFromPage() {
-    return new Promise((resolve) => {
-      const script = document.createElement('script');
-      script.textContent = `
-        try {
-          // Try movie_player API first (works after SPA navigation)
-          let captions = null;
-          const player = document.querySelector('#movie_player');
-          if (player && player.getPlayerResponse) {
-            const resp = player.getPlayerResponse();
-            if (resp && resp.captions) captions = resp.captions;
-          }
-          // Fallback to ytInitialPlayerResponse (works on initial page load)
-          if (!captions && window.ytInitialPlayerResponse && window.ytInitialPlayerResponse.captions) {
-            captions = window.ytInitialPlayerResponse.captions;
-          }
-          window.postMessage({ type: 'YT_CAPTION_TRACKS', data: captions }, '*');
-        } catch (e) {
-          window.postMessage({ type: 'YT_CAPTION_TRACKS', data: null }, '*');
-        }
-      `;
+  // Get caption tracks by fetching the page HTML (CSP-safe, no script injection)
+  async function getCaptionTracksFromPage() {
+    try {
+      const response = await fetch(location.href);
+      const html = await response.text();
 
-      const handler = (event) => {
-        if (event.data && event.data.type === 'YT_CAPTION_TRACKS') {
-          window.removeEventListener('message', handler);
-          if (document.head.contains(script)) document.head.removeChild(script);
+      // Find "captionTracks":[...] in the page source and extract the JSON array
+      const marker = '"captionTracks":';
+      const startIdx = html.indexOf(marker);
+      if (startIdx === -1) return null;
 
-          const captions = event.data.data;
-          if (captions && captions.playerCaptionsTracklistRenderer) {
-            const tracks = captions.playerCaptionsTracklistRenderer.captionTracks;
-            resolve(tracks && tracks.length > 0 ? tracks : null);
-          } else {
-            resolve(null);
-          }
-        }
-      };
+      const arrayStart = startIdx + marker.length;
+      let depth = 0;
+      let endIdx = arrayStart;
+      for (let i = arrayStart; i < html.length; i++) {
+        if (html[i] === '[') depth++;
+        if (html[i] === ']') depth--;
+        if (depth === 0) { endIdx = i + 1; break; }
+      }
 
-      window.addEventListener('message', handler);
-      document.head.appendChild(script);
-
-      setTimeout(() => {
-        window.removeEventListener('message', handler);
-        if (document.head.contains(script)) document.head.removeChild(script);
-        resolve(null);
-      }, 3000);
-    });
+      const tracks = JSON.parse(html.substring(arrayStart, endIdx));
+      return tracks.length > 0 ? tracks : null;
+    } catch (error) {
+      console.error('YouTube Summary: Error parsing caption tracks from page:', error);
+      return null;
+    }
   }
 
   // Fetch and parse transcript XML from a caption track URL
