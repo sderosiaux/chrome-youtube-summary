@@ -23,10 +23,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  if (request.action === "fetchCaptions") {
-    fetchCaptionsFromBackground(request.url)
-      .then((text) => sendResponse({ text }))
-      .catch((error) => sendResponse({ error: error.message }));
+  if (request.action === "fetchTranscript") {
+    fetchTranscriptInnertube(request.videoId)
+      .then((transcript) => sendResponse({ transcript }))
+      .catch((error) => {
+        console.error("YouTube Summary: [BG] fetchTranscript error:", error);
+        sendResponse({ error: error.message });
+      });
     return true;
   }
 
@@ -297,13 +300,77 @@ ${transcript}
   }
 }
 
-// Fetch caption URL from background (has proper cookie access via host_permissions)
-async function fetchCaptionsFromBackground(url) {
-  console.log("YouTube Summary: [BG] Fetching captions:", url.substring(0, 100));
-  const response = await fetch(url, { credentials: 'include' });
-  const text = await response.text();
-  console.log("YouTube Summary: [BG] Caption response:", response.status, "length:", text.length);
-  return text;
+// Fetch transcript via YouTube innertube API (same API the transcript panel uses)
+async function fetchTranscriptInnertube(videoId) {
+  console.log("YouTube Summary: [BG] Fetching transcript via innertube for:", videoId);
+
+  // Construct protobuf params: field1(field2(videoId))
+  const inner = '\x12' + String.fromCharCode(videoId.length) + videoId;
+  const outer = '\x0a' + String.fromCharCode(inner.length) + inner;
+  const params = btoa(outer);
+
+  const response = await fetch('https://www.youtube.com/youtubei/v1/get_transcript?prettyPrint=false', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      context: {
+        client: {
+          clientName: 'WEB',
+          clientVersion: '2.20250227.00.00',
+          hl: 'fr',
+          gl: 'FR'
+        }
+      },
+      params
+    })
+  });
+
+  console.log("YouTube Summary: [BG] Innertube response status:", response.status);
+  if (!response.ok) {
+    const err = await response.text();
+    console.error("YouTube Summary: [BG] Innertube error:", err.substring(0, 300));
+    return null;
+  }
+
+  const data = await response.json();
+
+  // Navigate the deeply nested response to extract cue texts
+  const actions = data.actions || [];
+  for (const action of actions) {
+    const panel = action.updateEngagementPanelAction?.content?.transcriptRenderer;
+    if (!panel) continue;
+
+    const cueGroups = panel.body?.transcriptBodyRenderer?.cueGroups || [];
+    console.log("YouTube Summary: [BG] Found", cueGroups.length, "cue groups");
+
+    const lines = cueGroups.map(group => {
+      const cue = group.transcriptCueGroupRenderer?.cues?.[0]?.transcriptCueRenderer?.cue;
+      return cue?.simpleText || cue?.runs?.map(r => r.text).join('') || '';
+    }).filter(Boolean);
+
+    if (lines.length > 0) {
+      const transcript = lines.join(' ').replace(/\s+/g, ' ').trim();
+      console.log("YouTube Summary: [BG] Transcript length:", transcript.length, "first 100:", transcript.substring(0, 100));
+      return transcript;
+    }
+  }
+
+  // Fallback: try initialSegments path
+  const renderer = data.actions?.[0]?.updateEngagementPanelAction?.content?.transcriptRenderer;
+  const segments = renderer?.body?.transcriptBodyRenderer?.initialSegments || [];
+  if (segments.length > 0) {
+    const lines = segments.map(s => {
+      const cue = s.transcriptSectionHeaderRenderer || s.transcriptSegmentRenderer;
+      return cue?.snippet?.runs?.map(r => r.text).join('') || '';
+    }).filter(Boolean);
+    const transcript = lines.join(' ').replace(/\s+/g, ' ').trim();
+    console.log("YouTube Summary: [BG] Transcript (segments path) length:", transcript.length);
+    return transcript;
+  }
+
+  console.error("YouTube Summary: [BG] Could not extract transcript from innertube response, keys:", JSON.stringify(Object.keys(data)));
+  console.log("YouTube Summary: [BG] Response preview:", JSON.stringify(data).substring(0, 500));
+  return null;
 }
 
 // Handle extension icon click

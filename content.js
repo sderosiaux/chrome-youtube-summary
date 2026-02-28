@@ -171,101 +171,20 @@
     }
   }
 
-  // Fetch and parse transcript from a caption track URL (handles XML and JSON3 formats)
-  async function fetchTranscriptFromUrl(baseUrl) {
-    // Add fmt=json3 for explicit format, and try via background for proper cookie access
-    const url = baseUrl + (baseUrl.includes('fmt=') ? '' : '&fmt=json3');
-    console.log('YouTube Summary: [TRANSCRIPT] Fetching URL:', url.substring(0, 120) + '...');
-
-    // Route through background service worker (has host_permissions + cookie access)
-    const result = await chrome.runtime.sendMessage({ action: 'fetchCaptions', url });
+  // Fetch transcript via innertube API (routed through background service worker)
+  async function fetchTranscriptViaInnertube(videoId) {
+    console.log('YouTube Summary: [INNERTUBE] Requesting transcript for:', videoId);
+    const result = await chrome.runtime.sendMessage({ action: 'fetchTranscript', videoId });
     if (result.error) {
-      console.error('YouTube Summary: [TRANSCRIPT] Background fetch error:', result.error);
+      console.error('YouTube Summary: [INNERTUBE] Error:', result.error);
       return null;
     }
-
-    const body = result.text || '';
-    console.log('YouTube Summary: [TRANSCRIPT] Body length:', body.length, 'starts with:', body.substring(0, 150));
-
-    // Try JSON3 format (YouTube's newer format for ASR captions)
-    if (body.startsWith('{')) {
-      try {
-        const json = JSON.parse(body);
-        console.log('YouTube Summary: [TRANSCRIPT] JSON3 format, keys:', Object.keys(json).join(', '), 'events:', (json.events || []).length);
-        const segments = (json.events || [])
-          .filter(e => e.segs)
-          .flatMap(e => e.segs.map(s => s.utf8))
-          .filter(Boolean);
-        console.log('YouTube Summary: [TRANSCRIPT] JSON3 segments:', segments.length, 'first:', segments.slice(0, 3).join('|'));
-        if (segments.length > 0) {
-          const transcript = segments.join('').replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
-          console.log('YouTube Summary: [TRANSCRIPT] JSON3 transcript length:', transcript.length);
-          return transcript.length > 50 ? transcript : null;
-        }
-      } catch (e) {
-        console.error('YouTube Summary: [TRANSCRIPT] JSON3 parse error:', e);
-      }
+    if (result.transcript) {
+      console.log('YouTube Summary: [INNERTUBE] Got transcript, length:', result.transcript.length);
+      return result.transcript;
     }
-
-    // Try XML format
-    if (body.startsWith('<?xml') || body.startsWith('<transcript') || body.startsWith('<timedtext')) {
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(body, 'text/xml');
-      const textNodes = doc.querySelectorAll('text');
-      console.log('YouTube Summary: [TRANSCRIPT] XML format, text nodes:', textNodes.length);
-
-      if (textNodes.length > 0) {
-        const transcript = Array.from(textNodes)
-          .map(node => {
-            const temp = document.createElement('span');
-            temp.innerHTML = node.textContent;
-            return temp.textContent;
-          })
-          .join(' ')
-          .replace(/\s+/g, ' ')
-          .trim();
-        console.log('YouTube Summary: [TRANSCRIPT] XML transcript length:', transcript.length);
-        return transcript.length > 50 ? transcript : null;
-      }
-    }
-
-    console.error('YouTube Summary: [TRANSCRIPT] Unrecognized format. Full body:', body.substring(0, 500));
+    console.log('YouTube Summary: [INNERTUBE] No transcript returned');
     return null;
-  }
-
-  // Pick the best caption track (prefer original language, then English, then first)
-  function pickBestTrack(tracks) {
-    const original = tracks.find(t => t.kind !== 'asr');
-    if (original) return original;
-    const english = tracks.find(t => t.languageCode === 'en');
-    if (english) return english;
-    return tracks[0];
-  }
-
-  // Extract transcript by fetching caption track content
-  async function extractTranscriptFromCaptionTracks() {
-    try {
-      console.log('YouTube Summary: Attempting caption tracks extraction');
-
-      const tracks = await getCaptionTracksFromPage();
-      if (!tracks) {
-        console.log('YouTube Summary: No caption tracks found');
-        return null;
-      }
-
-      console.log(`YouTube Summary: Found ${tracks.length} caption track(s)`);
-      const track = pickBestTrack(tracks);
-      if (!track || !track.baseUrl) {
-        console.log('YouTube Summary: No usable caption track, track:', JSON.stringify(track));
-        return null;
-      }
-
-      console.log(`YouTube Summary: Fetching transcript from track: ${track.languageCode} (kind: ${track.kind || 'manual'})`);
-      return await fetchTranscriptFromUrl(track.baseUrl);
-    } catch (error) {
-      console.error('YouTube Summary: Error fetching caption tracks:', error);
-      return null;
-    }
   }
 
   // Main transcript extraction function
@@ -274,16 +193,22 @@
 
     await waitForVideoElement();
 
-    // Method 1: Fetch directly from YouTube caption tracks API (most reliable)
-    let transcript = await extractTranscriptFromCaptionTracks();
+    const videoId = new URLSearchParams(location.search).get('v');
+    if (!videoId) {
+      console.log('YouTube Summary: No video ID found');
+      return null;
+    }
+
+    // Method 1: Innertube API (same API YouTube's transcript panel uses)
+    let transcript = await fetchTranscriptViaInnertube(videoId);
     if (transcript && transcript.length > 50) {
       transcriptData = transcript;
-      console.log('YouTube Summary: Transcript extracted via caption tracks', transcript.substring(0, 100) + '...');
+      console.log('YouTube Summary: Transcript extracted via innertube', transcript.substring(0, 100) + '...');
       return transcript;
     }
 
     // Method 2: DOM scraping fallback
-    console.log('YouTube Summary: Caption tracks failed, trying DOM method');
+    console.log('YouTube Summary: Innertube failed, trying DOM method');
     transcript = await extractTranscriptFromDOM();
     if (transcript && transcript.length > 50) {
       transcriptData = transcript;
