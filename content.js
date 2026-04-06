@@ -71,8 +71,12 @@
       // Also check any expanded engagement panel (chapters+transcript combo)
       const allPanels = document.querySelectorAll('ytd-engagement-panel-section-list-renderer');
       for (const p of allPanels) {
-        if (p.getAttribute('visibility') === 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED' &&
-            p.querySelector('ytd-item-section-renderer')) return true;
+        if (p.getAttribute('visibility') !== 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED') continue;
+        // Old format with item sections
+        if (p.querySelector('ytd-item-section-renderer')) return true;
+        // New searchable transcript format
+        const tid = p.getAttribute('target-id');
+        if (tid?.includes('transcript') && p.querySelector('ytd-transcript-segment-renderer yt-formatted-string.segment-text')) return true;
       }
     }
     return false;
@@ -87,27 +91,40 @@
     console.log('YouTube Summary: Opening transcript panel');
     const clicked = await openTranscriptPanel();
     if (!clicked) {
-      console.log('YouTube Summary: No transcript button found');
-      return null;
+      console.log('YouTube Summary: No transcript button found, trying API fallback');
     }
 
-    // Step 2: Wait for the panel DOM to appear
-    const panelReady = await waitForTranscriptPanel();
-    if (!panelReady) {
-      console.log('YouTube Summary: Transcript panel did not appear');
-      return null;
+    // Step 2: Wait for the panel DOM to appear (if button was clicked)
+    if (clicked) {
+      const panelReady = await waitForTranscriptPanel();
+      if (panelReady) {
+        // Step 3: Extract data via background script (needs MAIN world to access component data)
+        console.log('YouTube Summary: Panel ready, extracting data via MAIN world');
+        const result = await chrome.runtime.sendMessage({ action: 'extractTranscriptData' });
+        if (result?.transcript && result.transcript.length > 50) {
+          transcriptData = result.transcript;
+          console.log('YouTube Summary: Transcript extracted via DOM,', result.transcript.length, 'chars');
+          return result.transcript;
+        }
+        console.log('YouTube Summary: DOM extraction failed, trying API fallback. Result:', JSON.stringify(result));
+      } else {
+        console.log('YouTube Summary: Panel did not load, trying API fallback');
+      }
     }
 
-    // Step 3: Extract data via background script (needs MAIN world to access component data)
-    console.log('YouTube Summary: Panel ready, extracting data via MAIN world');
-    const result = await chrome.runtime.sendMessage({ action: 'extractTranscriptData' });
-    if (result?.transcript && result.transcript.length > 50) {
-      transcriptData = result.transcript;
-      console.log('YouTube Summary: Transcript extracted,', result.transcript.length, 'chars');
-      return result.transcript;
+    // Step 4: Fallback — call get_transcript API directly from MAIN world
+    const videoId = new URL(location.href).searchParams.get('v');
+    if (videoId) {
+      console.log('YouTube Summary: Trying get_transcript API for', videoId);
+      const apiResult = await chrome.runtime.sendMessage({ action: 'extractTranscriptAPI', videoId });
+      if (apiResult?.transcript && apiResult.transcript.length > 50) {
+        transcriptData = apiResult.transcript;
+        console.log('YouTube Summary: Transcript extracted via API,', apiResult.transcript.length, 'chars');
+        return apiResult.transcript;
+      }
+      console.log('YouTube Summary: API fallback also failed. Result:', JSON.stringify(apiResult));
     }
 
-    console.log('YouTube Summary: No transcript found. Result:', JSON.stringify(result));
     return null;
   }
 

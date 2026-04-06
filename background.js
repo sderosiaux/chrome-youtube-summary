@@ -33,6 +33,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === "extractTranscriptAPI") {
+    extractTranscriptViaAPI(sender.tab.id, request.videoId)
+      .then((transcript) => sendResponse({ transcript }))
+      .catch((error) => {
+        console.error("YouTube Summary: [BG] extractTranscriptAPI error:", error);
+        sendResponse({ error: error.message });
+      });
+    return true;
+  }
+
   if (request.action === "generateSummary") {
     const requestId = request.requestId || Date.now().toString();
     generateAISummary(request, requestId)
@@ -300,6 +310,173 @@ ${transcript}
   }
 }
 
+// Fallback: call get_transcript API from MAIN world context (has page cookies/auth)
+async function extractTranscriptViaAPI(tabId, videoId) {
+  console.log("YouTube Summary: [BG] Extracting transcript via API for:", videoId);
+
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    world: 'MAIN',
+    func: async (vid) => {
+      try {
+        // Get YouTube innertube config from the page
+        const apiKey = window.ytcfg?.get('INNERTUBE_API_KEY');
+        const clientVersion = window.ytcfg?.get('INNERTUBE_CLIENT_VERSION');
+        const visitorData = window.ytcfg?.get('VISITOR_DATA');
+
+        if (!apiKey) return { error: 'no ytcfg found' };
+
+        // Try method 1: get params from ytInitialData engagement panels
+        let params = null;
+        const engagementPanels = window.ytInitialData?.engagementPanels || [];
+        for (const ep of engagementPanels) {
+          const r = ep.engagementPanelSectionListRenderer;
+          if (!r) continue;
+          const tid = r.panelIdentifier || r.targetId;
+          if (tid && tid.includes('transcript')) {
+            const cont = r.content?.continuationItemRenderer;
+            if (cont?.continuationEndpoint?.getTranscriptEndpoint?.params) {
+              params = cont.continuationEndpoint.getTranscriptEndpoint.params;
+              break;
+            }
+          }
+        }
+
+        // Method 2: construct protobuf params from videoId
+        if (!params) {
+          const inner = '\x12' + String.fromCharCode(vid.length) + vid;
+          const outer = '\x0a' + String.fromCharCode(inner.length) + inner;
+          params = btoa(outer);
+        }
+
+        // Build SAPISID auth header (required by YouTube innertube API)
+        const headers = { 'Content-Type': 'application/json' };
+        const sapisid = document.cookie.match(/(?:SAPISID|__Secure-3PAPISID)=([^;]+)/)?.[1];
+        if (sapisid) {
+          const timestamp = Math.floor(Date.now() / 1000);
+          const origin = 'https://www.youtube.com';
+          const input = `${timestamp} ${sapisid} ${origin}`;
+          const hashBuffer = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(input));
+          const hash = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+          headers['Authorization'] = `SAPISIDHASH ${timestamp}_${hash}`;
+          headers['X-Origin'] = origin;
+        }
+
+        const body = JSON.stringify({
+          context: {
+            client: {
+              clientName: 'WEB',
+              clientVersion: clientVersion || '2.20260401.00.00',
+              visitorData
+            }
+          },
+          params
+        });
+
+        const url = '/youtubei/v1/get_transcript?key=' + apiKey + '&prettyPrint=false';
+
+        // Try fetch first, then XHR if blocked (e.g. by uBlock)
+        let data;
+        try {
+          const resp = await fetch(url, { method: 'POST', headers, credentials: 'include', body });
+          if (!resp.ok) throw new Error('fetch ' + resp.status);
+          data = await resp.json();
+        } catch (fetchErr) {
+          // Fallback: XHR (bypasses some content script fetch interceptors)
+          data = await new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', url);
+            xhr.withCredentials = true;
+            for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
+            xhr.onload = () => {
+              if (xhr.status >= 200 && xhr.status < 300) {
+                resolve(JSON.parse(xhr.responseText));
+              } else {
+                reject(new Error('XHR ' + xhr.status + ': ' + xhr.responseText.substring(0, 200)));
+              }
+            };
+            xhr.onerror = () => reject(new Error('XHR network error'));
+            xhr.send(body);
+          });
+        }
+
+        // Parse response: try actions path (new format)
+        const actions = data.actions || [];
+        for (const action of actions) {
+          const panel = action.updateEngagementPanelAction?.content?.transcriptRenderer;
+          if (!panel) continue;
+
+          const body = panel.body?.transcriptBodyRenderer;
+          if (!body) continue;
+
+          // Try cueGroups (most common)
+          const cueGroups = body.cueGroups || [];
+          if (cueGroups.length > 0) {
+            const lines = cueGroups.map(g => {
+              const cue = g.transcriptCueGroupRenderer?.cues?.[0]?.transcriptCueRenderer?.cue;
+              return cue?.simpleText || cue?.runs?.map(r => r.text).join('') || '';
+            }).filter(Boolean);
+            if (lines.length > 0) {
+              return { transcript: lines.join(' ').replace(/\s+/g, ' ').trim(), segments: lines.length, method: 'api-cueGroups' };
+            }
+          }
+
+          // Try initialSegments
+          const segments = body.initialSegments || [];
+          if (segments.length > 0) {
+            const lines = segments.map(s => {
+              const seg = s.transcriptSegmentRenderer;
+              if (!seg?.snippet) return '';
+              return seg.snippet.runs?.map(r => r.text).join('') || seg.snippet.simpleText || '';
+            }).filter(Boolean);
+            if (lines.length > 0) {
+              return { transcript: lines.join(' ').replace(/\s+/g, ' ').trim(), segments: lines.length, method: 'api-initialSegments' };
+            }
+          }
+        }
+
+        // Try transcriptSearchPanelRenderer path (searchable transcript format)
+        for (const action of actions) {
+          const searchPanel = action.updateEngagementPanelAction?.content?.transcriptSearchPanelRenderer;
+          if (!searchPanel) continue;
+
+          const body = searchPanel.body?.transcriptSegmentListRenderer;
+          const segments = body?.initialSegments || [];
+          if (segments.length > 0) {
+            const lines = segments.map(s => {
+              const seg = s.transcriptSegmentRenderer;
+              if (!seg?.snippet) return '';
+              return seg.snippet.runs?.map(r => r.text).join('') || seg.snippet.simpleText || '';
+            }).filter(Boolean);
+            if (lines.length > 0) {
+              return { transcript: lines.join(' ').replace(/\s+/g, ' ').trim(), segments: lines.length, method: 'api-searchPanel' };
+            }
+          }
+        }
+
+        return { error: 'no transcript in API response', keys: Object.keys(data), preview: JSON.stringify(data).substring(0, 500) };
+      } catch (e) {
+        return { error: e.message };
+      }
+    },
+    args: [videoId]
+  });
+
+  const result = results?.[0]?.result;
+  if (!result) {
+    console.error("YouTube Summary: [BG] No result from API extraction");
+    return null;
+  }
+
+  if (result.error) {
+    console.error("YouTube Summary: [BG] API extraction failed:", result.error, result.detail || result.preview || '');
+    return null;
+  }
+
+  console.log("YouTube Summary: [BG] API extracted", result.segments, "segments via", result.method, ",", result.transcript.length, "chars");
+  return result.transcript;
+}
+
 // Extract transcript by running code in the page's MAIN world via chrome.scripting
 // This bypasses the content script's isolated world limitation to access Polymer component data
 async function extractTranscriptFromMainWorld(tabId) {
@@ -309,29 +486,34 @@ async function extractTranscriptFromMainWorld(tabId) {
     target: { tabId },
     world: 'MAIN',
     func: () => {
-      // Find engagement panel with transcript data:
-      // 1) Dedicated transcript panel (videos without chapters)
-      // 2) Any expanded panel (videos with chapters use a combo panel with no target-id)
-      let panel = document.querySelector(
-        '[target-id="PAmodern_transcript_view"], [target-id*="transcript"]'
+      // Find any expanded transcript panel
+      const allPanels = document.querySelectorAll('ytd-engagement-panel-section-list-renderer');
+      let panel = Array.from(allPanels).find(p =>
+        p.getAttribute('visibility') === 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED' &&
+        (p.getAttribute('target-id')?.includes('transcript') || p.querySelector('ytd-item-section-renderer'))
       );
-      if (!panel?.querySelector('ytd-item-section-renderer')) {
-        const allPanels = document.querySelectorAll('ytd-engagement-panel-section-list-renderer');
-        panel = Array.from(allPanels).find(p =>
-          p.getAttribute('visibility') === 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED' &&
-          p.querySelector('ytd-item-section-renderer')
-        );
+      if (!panel) {
+        panel = document.querySelector('[target-id="PAmodern_transcript_view"], [target-id*="transcript"]');
       }
       if (!panel) return { error: 'no panel found' };
 
-      // Collect from ALL sections (chapters = multiple ytd-item-section-renderer)
+      // New format: ytd-transcript-segment-renderer with yt-formatted-string.segment-text
+      const segmentEls = panel.querySelectorAll('ytd-transcript-segment-renderer yt-formatted-string.segment-text');
+      if (segmentEls.length > 0) {
+        const texts = Array.from(segmentEls).map(el => el.textContent?.trim()).filter(Boolean);
+        if (texts.length > 0) {
+          return { transcript: texts.join(' ').replace(/\s+/g, ' ').trim(), segments: texts.length };
+        }
+      }
+
+      // Old format: ytd-item-section-renderer with component data
       const sections = panel.querySelectorAll('ytd-item-section-renderer');
       const allContents = [];
       for (const section of sections) {
         const contents = section.data?.contents;
         if (contents) allContents.push(...contents);
       }
-      if (allContents.length === 0) return { error: 'no contents', sectionsFound: sections.length };
+      if (allContents.length === 0 && sections.length === 0) return { error: 'no contents' };
 
       // Modern format: macroMarkersPanelItemViewModel
       const texts = allContents.map(item => {
