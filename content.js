@@ -369,12 +369,15 @@
       if (response && response.qa) {
         currentQA = response.qa;
         initializeMarkdownPreview(currentQA);
+      } else if (response && response.error) {
+        console.error('YouTube Summary: Q&A error:', response.error);
+        previewDiv.innerHTML = `<p class="qa-error">Erreur: ${response.error.replace(/</g, '&lt;')}</p>`;
       } else {
         previewDiv.innerHTML = '<p class="qa-error">Impossible de générer les Q&A. Ce contenu ne semble pas être un format interview/webinar.</p>';
       }
     } catch (error) {
       console.error('YouTube Summary: Error generating Q&A:', error);
-      previewDiv.innerHTML = '<p class="qa-error">Erreur lors de la génération des Q&A.</p>';
+      previewDiv.innerHTML = `<p class="qa-error">Erreur: ${error.message.replace(/</g, '&lt;')}</p>`;
     }
   }
 
