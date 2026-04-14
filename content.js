@@ -67,16 +67,19 @@
       const transcriptPanel = document.querySelector(
         '[target-id="PAmodern_transcript_view"], [target-id*="transcript"]'
       );
-      if (transcriptPanel?.querySelector('ytd-item-section-renderer')) return true;
-      // Also check any expanded engagement panel (chapters+transcript combo)
+      if (transcriptPanel?.querySelector('ytd-item-section-renderer, yt-item-section-renderer')) return true;
+      // Also check any expanded engagement panel
       const allPanels = document.querySelectorAll('ytd-engagement-panel-section-list-renderer');
       for (const p of allPanels) {
         if (p.getAttribute('visibility') !== 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED') continue;
-        // Old format with item sections
-        if (p.querySelector('ytd-item-section-renderer')) return true;
-        // New searchable transcript format
-        const tid = p.getAttribute('target-id');
-        if (tid?.includes('transcript') && p.querySelector('ytd-transcript-segment-renderer yt-formatted-string.segment-text')) return true;
+        // Item sections (old: ytd-, new: yt-)
+        if (p.querySelector('ytd-item-section-renderer, yt-item-section-renderer')) return true;
+        // Old searchable transcript format
+        if (p.querySelector('ytd-transcript-segment-renderer yt-formatted-string.segment-text')) return true;
+        // New view-model transcript format (2025+)
+        if (p.querySelector('transcript-segment-view-model')) return true;
+        // data-target-id on child (panel itself may have no target-id)
+        if (p.querySelector('[data-target-id*="transcript"]')) return true;
       }
     }
     return false;

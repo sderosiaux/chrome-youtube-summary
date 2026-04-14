@@ -497,14 +497,29 @@ async function extractTranscriptFromMainWorld(tabId) {
       const allPanels = document.querySelectorAll('ytd-engagement-panel-section-list-renderer');
       let panel = Array.from(allPanels).find(p =>
         p.getAttribute('visibility') === 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED' &&
-        (p.getAttribute('target-id')?.includes('transcript') || p.querySelector('ytd-item-section-renderer'))
+        (p.getAttribute('target-id')?.includes('transcript') ||
+         p.querySelector('ytd-item-section-renderer, yt-item-section-renderer') ||
+         p.querySelector('transcript-segment-view-model') ||
+         p.querySelector('[data-target-id*="transcript"]'))
       );
       if (!panel) {
         panel = document.querySelector('[target-id="PAmodern_transcript_view"], [target-id*="transcript"]');
       }
       if (!panel) return { error: 'no panel found' };
 
-      // New format: ytd-transcript-segment-renderer with yt-formatted-string.segment-text
+      // 2025+ format: transcript-segment-view-model with span text
+      const newSegEls = panel.querySelectorAll('transcript-segment-view-model');
+      if (newSegEls.length > 0) {
+        const texts = Array.from(newSegEls).map(el => {
+          const span = el.querySelector('span[role="text"]') || el.querySelector('span.ytAttributedStringHost');
+          return span?.textContent?.trim();
+        }).filter(Boolean);
+        if (texts.length > 0) {
+          return { transcript: texts.join(' ').replace(/\s+/g, ' ').trim(), segments: texts.length };
+        }
+      }
+
+      // Searchable transcript format: ytd-transcript-segment-renderer with yt-formatted-string.segment-text
       const segmentEls = panel.querySelectorAll('ytd-transcript-segment-renderer yt-formatted-string.segment-text');
       if (segmentEls.length > 0) {
         const texts = Array.from(segmentEls).map(el => el.textContent?.trim()).filter(Boolean);
@@ -513,8 +528,8 @@ async function extractTranscriptFromMainWorld(tabId) {
         }
       }
 
-      // Old format: ytd-item-section-renderer with component data
-      const sections = panel.querySelectorAll('ytd-item-section-renderer');
+      // Item section format: ytd-item-section-renderer OR yt-item-section-renderer with component data
+      const sections = panel.querySelectorAll('ytd-item-section-renderer, yt-item-section-renderer');
       const allContents = [];
       for (const section of sections) {
         const contents = section.data?.contents;
@@ -522,7 +537,7 @@ async function extractTranscriptFromMainWorld(tabId) {
       }
       if (allContents.length === 0 && sections.length === 0) return { error: 'no contents' };
 
-      // Modern format: macroMarkersPanelItemViewModel
+      // macroMarkersPanelItemViewModel format
       const texts = allContents.map(item => {
         const vm = item.macroMarkersPanelItemViewModel?.item?.timelineItemViewModel;
         if (!vm?.contentItems) return null;
@@ -548,7 +563,7 @@ async function extractTranscriptFromMainWorld(tabId) {
         return { transcript: textsOld.join(' ').replace(/\s+/g, ' ').trim(), segments: textsOld.length };
       }
 
-      return { error: 'unknown structure', firstKey: Object.keys(allContents[0])[0] };
+      return { error: 'unknown structure', firstKey: allContents[0] ? Object.keys(allContents[0])[0] : 'empty' };
     }
   });
 
