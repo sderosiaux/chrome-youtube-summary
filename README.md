@@ -70,7 +70,7 @@ L’iframe est limitée aux pages YouTube et doit présenter le jeton de la sess
 
 ## Limites
 
-YouTube modifie régulièrement son interface et son API interne. L’extraction nécessite une transcription accessible ; les vidéos privées, restreintes, certains directs et les vidéos sans sous-titres peuvent ne pas fonctionner. Si seules les lignes visibles du DOM ou une réponse avec continuation sont disponibles, une indication de transcription potentiellement partielle est affichée. Les timestamps absents ne sont pas inventés.
+YouTube modifie régulièrement son interface et son API interne. L’extraction nécessite une transcription accessible ; les vidéos privées, restreintes, certains directs et les vidéos sans sous-titres peuvent ne pas fonctionner. Les données de tous les chapitres sont réunies et les doublons entre composants parents et enfants sont supprimés. Si seules les lignes visibles du DOM ou une réponse avec continuation sont disponibles, ou si la transcription s’arrête très loin de la fin de la vidéo, une indication de transcription potentiellement partielle est affichée et cette extraction n’est pas mémorisée comme complète. Les timestamps absents ne sont pas inventés.
 
 Une clé API personnelle est nécessaire. Le coût et la qualité dépendent du contenu et du format. Les assertions du résumé ne constituent pas une vérification externe des propos de la vidéo.
 

@@ -163,9 +163,18 @@
       let value = dom;
       if (!dom.segments?.length || dom.partial) {
         const api = await read(true);
+        const lastTimestamp = (result) =>
+          Math.max(
+            -1,
+            ...(result.segments || []).map((s) => s.start).filter(Number.isFinite),
+          );
+        const apiEnd = lastTimestamp(api);
+        const domEnd = lastTimestamp(dom);
         if (
           api.segments?.length &&
-          (!api.partial || api.segments.length > (dom.segments?.length || 0))
+          (!api.partial || apiEnd > domEnd ||
+            (apiEnd === domEnd &&
+              api.segments.length > (dom.segments?.length || 0)))
         )
           value = api;
       }

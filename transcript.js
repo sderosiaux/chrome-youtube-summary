@@ -29,6 +29,27 @@ export async function extractInPage(videoId, useAPI = false) {
     );
     return n === undefined ? null : Number(n) / 1000;
   };
+  const mergeSegments = (segments) => {
+    const unique = new Map();
+    for (const segment of segments) {
+      const text = segment.text?.replace(/\s+/g, ' ').trim();
+      if (!text) continue;
+      const key = JSON.stringify([segment.start, text]);
+      if (!unique.has(key)) unique.set(key, { ...segment, text });
+    }
+    return [...unique.values()].sort(
+      (a, b) => (a.start ?? Infinity) - (b.start ?? Infinity),
+    );
+  };
+  const suspiciousCoverage = (segments) => {
+    const duration = document.querySelector('video')?.duration;
+    if (!Number.isFinite(duration) || duration <= 0) return false;
+    const starts = segments.map((s) => s.start).filter(Number.isFinite);
+    if (!starts.length) return true;
+    // Missing continuation metadata does not prove that every chapter loaded.
+    // Allow a short outro; flag a large uncovered tail without discarding text.
+    return duration - Math.max(...starts) > Math.max(60, duration * 0.1);
+  };
   const collect = (root) => {
     const segments = [];
     let continuation = false;
@@ -109,25 +130,22 @@ export async function extractInPage(videoId, useAPI = false) {
   const panels = expanded.length ? expanded : candidates;
   if (!useAPI) {
     // Component data is preferred to visible DOM, which YouTube may virtualize.
-    let best = { segments: [], partial: true, method: 'component' };
+    // Each item-section can be ONE chapter, not the complete transcript.
+    // Collect the entire forest before deciding whether extraction is complete.
+    const roots = [];
     for (const panel of panels) {
       const data = [
         ...panel.querySelectorAll(
-          'ytd-item-section-renderer, yt-item-section-renderer, ytd-transcript-renderer, ytd-transcript-segment-list-renderer',
+          'ytd-section-list-renderer, yt-section-list-renderer, ytd-item-section-renderer, yt-item-section-renderer, ytd-transcript-renderer, ytd-transcript-segment-list-renderer',
         ),
       ]
         .map((el) => el.data)
         .filter(Boolean);
-      if (panel.data) data.push(panel.data);
-      // Do not concatenate overlapping parent and child data trees.
-      for (const item of data) {
-        const result = collect(item);
-        if (result.segments.length && !result.partial)
-          return { ...result, method: 'component' };
-        if (result.segments.length > best.segments.length)
-          best = { ...result, method: 'component' };
-      }
+      roots.push(...data);
+      if (panel.data) roots.push(panel.data);
     }
+    const component = collect(roots);
+    const componentSegments = mergeSegments(component.segments);
     const segments = [];
     for (const panel of panels) {
       for (const el of panel.querySelectorAll(
@@ -142,9 +160,17 @@ export async function extractInPage(videoId, useAPI = false) {
         if (text) segments.push({ text, start: timeOf(timestamp) });
       }
     }
-    return best.segments.length > segments.length
-      ? best
-      : { segments, partial: true, method: 'visible-dom' };
+    const allSegments = mergeSegments([...componentSegments, ...segments]);
+    // DOM rows can fill holes while new component data is still loading, but
+    // that combination remains partial until a complete data source is found.
+    const domAddedRows = allSegments.length > componentSegments.length;
+    return {
+      segments: allSegments,
+      partial:
+        !componentSegments.length || component.partial || domAddedRows ||
+        suspiciousCoverage(allSegments),
+      method: componentSegments.length ? 'component' : 'visible-dom',
+    };
   }
   try {
     const apiKey = window.ytcfg?.get('INNERTUBE_API_KEY');
@@ -224,7 +250,12 @@ export async function extractInPage(videoId, useAPI = false) {
     }
     if (currentId() !== videoId) return { error: 'La vidéo a changé.' };
     const result = collect(data.actions || data);
-    return { ...result, method: 'api' };
+    const segments = mergeSegments(result.segments);
+    return {
+      segments,
+      partial: result.partial || suspiciousCoverage(segments),
+      method: 'api',
+    };
   } catch (error) {
     return { error: error.message };
   }
