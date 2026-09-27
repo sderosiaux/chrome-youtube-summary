@@ -1,123 +1,121 @@
-// Options page functionality
-document.addEventListener('DOMContentLoaded', function() {
-    const apiKeyInput = document.getElementById('apiKey');
-    const customPromptInput = document.getElementById('customPrompt');
-    const saveButton = document.getElementById('save');
-    const resetButton = document.getElementById('reset');
-    const statusDiv = document.getElementById('status');
+import { DEFAULT_PROMPT, DETAIL_LEVELS, MODEL } from './config.js';
+import { getSettings, saveSettings, clearCache } from './storage.js';
 
-    // Default prompt
-    const defaultPrompt = `Please provide a comprehensive summary of this YouTube video transcript. Include:
-
-1. **Main Topic**: What is the video primarily about?
-2. **Key Points**: List the most important points discussed (3-5 bullet points)
-3. **Key Insights**: Any valuable insights, lessons, or takeaways
-4. **Conclusion**: Brief wrap-up of the main message
-
-Keep the summary concise but informative, around 200-300 words.`;
-
-    // Load saved settings
-    loadSettings();
-
-    // Event listeners
-    saveButton.addEventListener('click', saveSettings);
-    resetButton.addEventListener('click', resetSettings);
-
-    // Auto-hide status after 3 seconds
-    function showStatus(message, type = 'success') {
-        statusDiv.textContent = message;
-        statusDiv.className = `status ${type}`;
-
-        setTimeout(() => {
-            statusDiv.classList.add('hidden');
-        }, 3000);
-    }
-
-    // Load settings from storage
-    async function loadSettings() {
-        try {
-            const result = await chrome.storage.sync.get(['openaiApiKey', 'customPrompt']);
-
-            if (result.openaiApiKey) {
-                apiKeyInput.value = result.openaiApiKey;
-            }
-
-            if (result.customPrompt) {
-                customPromptInput.value = result.customPrompt;
-            } else {
-                customPromptInput.placeholder = defaultPrompt;
-            }
-        } catch (error) {
-            console.error('Error loading settings:', error);
-            showStatus('Error loading settings', 'error');
-        }
-    }
-
-    // Save settings to storage
-    async function saveSettings() {
-        const apiKey = apiKeyInput.value.trim();
-        const customPrompt = customPromptInput.value.trim();
-
-        // Validate API key
-        if (!apiKey) {
-            showStatus('Please enter your OpenAI API key', 'error');
-            apiKeyInput.focus();
-            return;
-        }
-
-        if (!apiKey.startsWith('sk-')) {
-            showStatus('Invalid API key format. OpenAI API keys start with "sk-"', 'error');
-            apiKeyInput.focus();
-            return;
-        }
-
-        try {
-            // Test API key by making a simple request
-            showStatus('Validating API key...', 'info');
-
-            const testResponse = await fetch('https://api.openai.com/v1/models', {
-                headers: {
-                    'Authorization': `Bearer ${apiKey}`
-                }
-            });
-
-            if (!testResponse.ok) {
-                throw new Error('Invalid API key');
-            }
-
-            // Save to storage
-            await chrome.storage.sync.set({
-                openaiApiKey: apiKey,
-                customPrompt: customPrompt || null
-            });
-
-            showStatus('Settings saved successfully!', 'success');
-        } catch (error) {
-            console.error('Error saving settings:', error);
-            showStatus('Invalid API key. Please check and try again.', 'error');
-        }
-    }
-
-    // Reset settings to defaults
-    async function resetSettings() {
-        if (confirm('Are you sure you want to reset all settings to defaults?')) {
-            try {
-                await chrome.storage.sync.clear();
-                apiKeyInput.value = '';
-                customPromptInput.value = '';
-                customPromptInput.placeholder = defaultPrompt;
-                showStatus('Settings reset to defaults', 'success');
-            } catch (error) {
-                console.error('Error resetting settings:', error);
-                showStatus('Error resetting settings', 'error');
-            }
-        }
-    }
-
-    // Handle Enter key in API key field
-    apiKeyInput.addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') {
-            saveSettings();
-        }
+const $ = (id) => document.getElementById(id);
+const status = (text, type = 'success') => {
+  $('status').textContent = text;
+  $('status').dataset.type = type;
+  $('status').hidden = false;
+};
+$('defaultPrompt').textContent = DEFAULT_PROMPT;
+async function load() {
+  try {
+    const settings = await getSettings();
+    $('apiKey').value = settings.apiKey;
+    $('rememberKey').checked = settings.rememberKey;
+    $('customPrompt').value = settings.customPrompt || '';
+    $('detail').value = DETAIL_LEVELS[settings.detail]
+      ? settings.detail
+      : 'detailed';
+  } catch {
+    status('Impossible de charger les paramètres.', 'error');
+  }
+}
+$('settings-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  $('save').disabled = true;
+  try {
+    await saveSettings({
+      apiKey: $('apiKey').value.trim(),
+      rememberKey: $('rememberKey').checked,
+      customPrompt: $('customPrompt').value.trim(),
+      detail: $('detail').value,
     });
+    status('Paramètres enregistrés.');
+  } catch {
+    status(
+      'Impossible d’enregistrer les paramètres. Vérifie le stockage disponible.',
+      'error',
+    );
+  } finally {
+    $('save').disabled = false;
+  }
 });
+$('reveal').addEventListener('click', () => {
+  const show = $('apiKey').type === 'password';
+  $('apiKey').type = show ? 'text' : 'password';
+  $('reveal').textContent = show ? 'Masquer' : 'Afficher';
+  $('reveal').setAttribute(
+    'aria-label',
+    show ? 'Masquer la clé' : 'Afficher la clé',
+  );
+});
+$('testKey').addEventListener('click', async () => {
+  const apiKey = $('apiKey').value.trim();
+  if (!apiKey) {
+    status('Saisis une clé OpenAI pour vérifier l’accès.', 'error');
+    $('apiKey').focus();
+    return;
+  }
+  $('testKey').disabled = true;
+  status('Vérification de l’accès à Luna…');
+  try {
+    const response = await fetch(`https://api.openai.com/v1/models/${MODEL}`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (response.ok)
+      status(
+        'Luna est accessible. Ce contrôle ne génère aucun texte et ne vérifie pas le crédit disponible.',
+      );
+    else if (response.status === 401)
+      status('La clé est invalide ou a expiré.', 'error');
+    else if (response.status === 403)
+      status(
+        'Accès refusé au catalogue de modèles. Vérifie les permissions de la clé ; tu peux néanmoins l’enregistrer.',
+        'error',
+      );
+    else if (response.status === 404)
+      status('Luna n’est pas disponible pour cette clé.', 'error');
+    else
+      status(
+        `OpenAI n’a pas pu vérifier l’accès (HTTP ${response.status}).`,
+        'error',
+      );
+  } catch {
+    status(
+      'Connexion à OpenAI impossible. Vérifie le réseau et réessaie.',
+      'error',
+    );
+  } finally {
+    $('testKey').disabled = false;
+  }
+});
+$('resetPrompt').addEventListener('click', () => {
+  $('customPrompt').value = '';
+  status(
+    'Instructions par défaut sélectionnées. Clique sur Enregistrer pour les appliquer.',
+  );
+});
+$('removeKey').addEventListener('click', async () => {
+  try {
+    await Promise.all([
+      chrome.storage.local.remove('openaiApiKey'),
+      chrome.storage.session.remove('openaiApiKey'),
+    ]);
+    $('apiKey').value = '';
+    $('rememberKey').checked = false;
+    status('Clé supprimée de cet appareil.');
+  } catch {
+    status('Impossible de supprimer la clé.', 'error');
+  }
+});
+$('clearCache').addEventListener('click', async () => {
+  try {
+    await clearCache();
+    status('Notes enregistrées et brouillons effacés.');
+  } catch {
+    status('Impossible d’effacer les notes enregistrées.', 'error');
+  }
+});
+load();

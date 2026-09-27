@@ -1,606 +1,100 @@
-// background.js
-console.log("YouTube Summary: Background script loaded");
+import { initializeStorage } from './storage.js';
+import { videoIdFromUrl } from './config.js';
+import { extractInPage } from './transcript.js';
 
-// Store active AbortControllers to allow cancellation
-const activeRequests = new Map();
+initializeStorage().catch(() =>
+  console.error('YouTube Summary: migration du stockage impossible.'),
+);
 
-chrome.runtime.onInstalled.addListener(() => {
-  console.log("YouTube Summary: Extension installed");
-});
-
-// Handle messages from content script
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  console.log("YouTube Summary: Message received in background:", request);
-
-  if (request.action === "cancelRequest") {
-    const controller = activeRequests.get(request.requestId);
-    if (controller) {
-      controller.abort();
-      activeRequests.delete(request.requestId);
-      console.log("YouTube Summary: Request cancelled:", request.requestId);
-    }
-    sendResponse({ cancelled: true });
-    return true;
-  }
-
-  if (request.action === "extractTranscriptData") {
-    extractTranscriptFromMainWorld(sender.tab.id)
-      .then((transcript) => sendResponse({ transcript }))
-      .catch((error) => {
-        console.error("YouTube Summary: [BG] extractTranscript error:", error);
-        sendResponse({ error: error.message });
-      });
-    return true;
-  }
-
-  if (request.action === "extractTranscriptAPI") {
-    extractTranscriptViaAPI(sender.tab.id, request.videoId)
-      .then((transcript) => sendResponse({ transcript }))
-      .catch((error) => {
-        console.error("YouTube Summary: [BG] extractTranscriptAPI error:", error);
-        sendResponse({ error: error.message });
-      });
-    return true;
-  }
-
-  if (request.action === "generateSummary") {
-    const requestId = request.requestId || Date.now().toString();
-    generateAISummary(request, requestId)
-      .then((summary) => {
-        activeRequests.delete(requestId);
-        sendResponse({ summary });
+function isReader(sender) {
+  return (
+    sender.id === chrome.runtime.id &&
+    sender.url?.startsWith(chrome.runtime.getURL('reader.html') + '?') &&
+    Number.isInteger(sender.tab?.id)
+  );
+}
+chrome.runtime.onMessage.addListener((request, sender, reply) => {
+  if (sender.id !== chrome.runtime.id) return false;
+  let work;
+  if (
+    [
+      'readerContext',
+      'readerExtract',
+      'readerCancel',
+      'readerClose',
+      'readerSeek',
+    ].includes(request.action) &&
+    isReader(sender)
+  ) {
+    work = chrome.tabs.sendMessage(sender.tab.id, request, { frameId: 0 });
+  } else if (
+    request.action === 'extractTranscript' &&
+    sender.frameId === 0 &&
+    Number.isInteger(sender.tab?.id) &&
+    sender.url?.startsWith('https://www.youtube.com/')
+  ) {
+    // MessageSender.url can retain the document's initial URL after a YouTube SPA navigation.
+    work = chrome.tabs
+      .get(sender.tab.id)
+      .then((tab) => {
+        if (videoIdFromUrl(tab.url) !== request.videoId)
+          throw new Error('La vidéo a changé. Rouvre les notes.');
+        return chrome.scripting.executeScript({
+          target: { tabId: tab.id, frameIds: [0] },
+          world: 'MAIN',
+          func: extractInPage,
+          args: [request.videoId, Boolean(request.useAPI)],
+        });
       })
-      .catch((error) => {
-        activeRequests.delete(requestId);
-        console.error("YouTube Summary: Error generating summary:", error);
-        sendResponse({ error: error.message, cancelled: error.name === 'AbortError' });
-      });
-    return true; // Keep message channel open for async response
-  }
-
-  if (request.action === "generateQA") {
-    const requestId = request.requestId || Date.now().toString();
-    generateQAExtraction(request, requestId)
-      .then((qa) => {
-        activeRequests.delete(requestId);
-        sendResponse({ qa });
-      })
-      .catch((error) => {
-        activeRequests.delete(requestId);
-        console.error("YouTube Summary: Error generating Q&A:", error);
-        sendResponse({ error: error.message, cancelled: error.name === 'AbortError' });
-      });
-    return true;
-  }
-
+      .then(
+        (results) =>
+          results?.[0]?.result || {
+            error: 'La transcription est inaccessible.',
+          },
+      );
+  } else if (request.action === 'openOptions' && isReader(sender)) {
+    work = chrome.runtime.openOptionsPage().then(() => ({ ok: true }));
+  } else return false;
+  Promise.resolve(work).then(reply, (error) =>
+    reply({
+      error: error.message || 'La connexion à la vidéo a été interrompue.',
+    }),
+  );
   return true;
 });
-
-// API timeout in milliseconds (10 minutes for very long videos)
-const API_TIMEOUT_MS = 600000;
-
-// Generate AI summary using OpenAI API
-async function generateAISummary({ transcript, title, channel, url }, requestId) {
-  // Create AbortController for timeout and cancellation
-  const controller = new AbortController();
-  activeRequests.set(requestId, controller);
-
-  // Set timeout
-  const timeoutId = setTimeout(() => {
-    controller.abort();
-    console.error("YouTube Summary: API request timed out after", API_TIMEOUT_MS / 1000, "seconds");
-  }, API_TIMEOUT_MS);
-
+async function openReader(tab) {
+  if (!videoIdFromUrl(tab?.url)) {
+    await chrome.runtime.openOptionsPage();
+    return;
+  }
   try {
-    // Get API key from storage
-    const result = await chrome.storage.sync.get([
-      "openaiApiKey",
-      "customPrompt",
-    ]);
-    const apiKey = result.openaiApiKey;
-
-    if (!apiKey) {
-      throw new Error(
-        "OpenAI API key not configured. Please set it in the extension options.",
-      );
-    }
-
-    // Default prompt if none provided
-    const customPrompt = `
-Résumé EXHAUSTIF en français • Termes techniques → anglais • Longueur proportionnelle au contenu
-
-STYLE: Incisif, direct • Symboles: →, ≠, ~, +, *, etc.
-
-TYPE AUTO-DÉTECTÉ:
-- TALK/CONFÉRENCE → thèse + arguments + implications
-- REVIEW/ANALYSE → méthodologie + évaluation + recommandations
-
----
-
-## TL;DR
-[TALK/REVIEW] → Une phrase brutale capturant l'essence + positionnement
-
-## Points Clés (8-12)
-Classés par importance décroissante. Pour chaque point:
-* **Point** → Affirmation factuelle extraite de la transcription
-  - 💭 *Opinion*: Position/jugement de l'auteur (si applicable)
-  - 📊 *Preuve*: Donnée/étude/stat citée (si applicable)
-  - ⚡ *Impact*: Conséquence pratique
-
-## Données & Stats
-Extraire TOUS les chiffres mentionnés:
-* % | Montants | Volumes | Dates | Comparaisons | Métriques
-
-## Citations Clés
-* 📌 Factuelles (vérifiables)
-* 💬 Opinionnelles (jugements personnels)
-* ⚠️ À vérifier (claims sans source)
-
-## Fiabilité
-* ⚠️ Points faibles ou manquant de support dans la transcription
-* Confiance globale: 🟢 ÉLEVÉE | 🟡 MOYENNE | 🔴 FAIBLE
-    `.trim();
-
-    const prompt = `
-${customPrompt}
-
-Video Title: ${title}
-Channel: ${channel || "Unknown"}
-
-Transcript:
-${transcript}
-    `.trim();
-
-    console.log("YouTube Summary: Making OpenAI API request");
-
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-5.1",
-        messages: [
-          {
-            role: "user",
-            content: prompt,
-          },
-        ],
-        max_completion_tokens: 8000,
-        temperature: 0.7,
-      }),
-      signal: controller.signal,
+    await chrome.tabs.sendMessage(
+      tab.id,
+      { action: 'triggerSummary' },
+      { frameId: 0 },
+    );
+  } catch {
+    // Existing tabs may predate installation/reload.
+    await chrome.scripting.insertCSS({
+      target: { tabId: tab.id },
+      files: ['content.css'],
     });
-
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      console.error("YouTube Summary: OpenAI API error response:", JSON.stringify(errorData, null, 2));
-      console.error("YouTube Summary: HTTP status:", response.status, response.statusText);
-      throw new Error(
-        `OpenAI API error: ${errorData.error?.message || response.statusText}`,
-      );
-    }
-
-    const data = await response.json();
-    const summary = data.choices[0]?.message?.content?.trim();
-
-    if (!summary) {
-      throw new Error("No summary generated by OpenAI API");
-    }
-
-    console.log("YouTube Summary: Summary generated successfully");
-    return summary;
-  } catch (error) {
-    clearTimeout(timeoutId);
-    if (error.name === 'AbortError') {
-      throw new Error("Requête annulée ou timeout dépassé (2 min)");
-    }
-    console.error("YouTube Summary: Error in generateAISummary:", error);
-    console.error("YouTube Summary: Full error details:", error.message, error.stack);
-    throw error;
-  }
-}
-
-// Generate Q&A extraction using OpenAI API
-async function generateQAExtraction({ transcript, title, channel, url }, requestId) {
-  // Create AbortController for timeout and cancellation
-  const controller = new AbortController();
-  activeRequests.set(requestId, controller);
-
-  // Set timeout
-  const timeoutId = setTimeout(() => {
-    controller.abort();
-    console.error("YouTube Summary: Q&A API request timed out after", API_TIMEOUT_MS / 1000, "seconds");
-  }, API_TIMEOUT_MS);
-
-  try {
-    // Get API key from storage
-    const result = await chrome.storage.sync.get(["openaiApiKey"]);
-    const apiKey = result.openaiApiKey;
-
-    if (!apiKey) {
-      throw new Error(
-        "OpenAI API key not configured. Please set it in the extension options.",
-      );
-    }
-
-    const qaPrompt = `Reformat this video transcript into a clean Q&A structure, reordered for logical flow. Works for interviews, webinars, talks, and educational monologues.
-
-Extract three types of questions:
-- Explicit: asked by a host/interviewer
-- Rhetorical: asked by the speaker themselves ("What is X? Let me explain...")
-- Implicit: topics introduced then explained, even without a formal question
-
-Output format (exactly):
-
-Question: <short paraphrased question>
-- <concise answer focused on what they actually claim or explain>
-
-Rules:
-- Drop all noise: greetings, sponsors, coupons, "can you hear me?", small talk, housekeeping
-- Detect rhetorical cues ("You might wonder...", "The question is...", "How do we X?")
-- For implicit Q&A, formulate the underlying question when a concept is introduced then explained
-- Merge follow-up questions into the main one when they stay on the same topic
-- Skip duplicates
-- Reorder questions so the flow makes sense thematically, not chronologically
-- Plain, direct language — no hype, no filler
-- For solo monologues, build an artificial Q&A if the content has pedagogical structure
-- Only if the content is purely narrative with no teachable structure, output: "Contenu purement narratif, sans structure Q&A adaptable."
-
-IMPORTANT: The output (questions and answers) MUST be in French, regardless of the transcript language. Technical terms stay in English.`;
-
-    const prompt = `
-${qaPrompt}
-
-Video Title: ${title}
-Channel: ${channel || "Unknown"}
-
-Transcript:
-${transcript}
-    `.trim();
-
-    console.log("YouTube Summary: Making OpenAI API request for Q&A");
-
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-5.1",
-        messages: [
-          {
-            role: "user",
-            content: prompt,
-          },
-        ],
-        max_completion_tokens: 16000,
-        temperature: 0.5,
-      }),
-      signal: controller.signal,
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: ['content.js'],
     });
-
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(
-        `OpenAI API error: ${errorData.error?.message || response.statusText}`,
-      );
-    }
-
-    const data = await response.json();
-    const qa = data.choices[0]?.message?.content?.trim();
-    const finishReason = data.choices[0]?.finish_reason;
-
-    if (!qa) {
-      console.error("YouTube Summary: Empty Q&A. finish_reason:", finishReason, "usage:", data.usage);
-      const usage = data.usage || {};
-      throw new Error(
-        `Réponse vide (finish_reason: ${finishReason || '?'}, completion: ${usage.completion_tokens || 0} tokens, reasoning: ${usage.completion_tokens_details?.reasoning_tokens || 0})`
-      );
-    }
-
-    console.log("YouTube Summary: Q&A generated successfully, tokens:", data.usage);
-    return qa;
-  } catch (error) {
-    clearTimeout(timeoutId);
-    if (error.name === 'AbortError') {
-      throw new Error("Requête annulée ou timeout dépassé (2 min)");
-    }
-    console.error("YouTube Summary: Error in generateQAExtraction:", error);
-    throw error;
+    await chrome.tabs.sendMessage(
+      tab.id,
+      { action: 'triggerSummary' },
+      { frameId: 0 },
+    );
   }
 }
-
-// Fallback: call get_transcript API from MAIN world context (has page cookies/auth)
-async function extractTranscriptViaAPI(tabId, videoId) {
-  console.log("YouTube Summary: [BG] Extracting transcript via API for:", videoId);
-
-  const results = await chrome.scripting.executeScript({
-    target: { tabId },
-    world: 'MAIN',
-    func: async (vid) => {
-      try {
-        // Get YouTube innertube config from the page
-        const apiKey = window.ytcfg?.get('INNERTUBE_API_KEY');
-        const clientVersion = window.ytcfg?.get('INNERTUBE_CLIENT_VERSION');
-        const visitorData = window.ytcfg?.get('VISITOR_DATA');
-
-        if (!apiKey) return { error: 'no ytcfg found' };
-
-        // Try method 1: get params from ytInitialData engagement panels
-        let params = null;
-        const engagementPanels = window.ytInitialData?.engagementPanels || [];
-        for (const ep of engagementPanels) {
-          const r = ep.engagementPanelSectionListRenderer;
-          if (!r) continue;
-          const tid = r.panelIdentifier || r.targetId;
-          if (tid && tid.includes('transcript')) {
-            const cont = r.content?.continuationItemRenderer;
-            if (cont?.continuationEndpoint?.getTranscriptEndpoint?.params) {
-              params = cont.continuationEndpoint.getTranscriptEndpoint.params;
-              break;
-            }
-          }
-        }
-
-        // Method 2: construct protobuf params from videoId
-        if (!params) {
-          const inner = '\x12' + String.fromCharCode(vid.length) + vid;
-          const outer = '\x0a' + String.fromCharCode(inner.length) + inner;
-          params = btoa(outer);
-        }
-
-        // Build SAPISID auth header (required by YouTube innertube API)
-        const headers = { 'Content-Type': 'application/json' };
-        const sapisid = document.cookie.match(/(?:SAPISID|__Secure-3PAPISID)=([^;]+)/)?.[1];
-        if (sapisid) {
-          const timestamp = Math.floor(Date.now() / 1000);
-          const origin = 'https://www.youtube.com';
-          const input = `${timestamp} ${sapisid} ${origin}`;
-          const hashBuffer = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(input));
-          const hash = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
-          headers['Authorization'] = `SAPISIDHASH ${timestamp}_${hash}`;
-          headers['X-Origin'] = origin;
-        }
-
-        const body = JSON.stringify({
-          context: {
-            client: {
-              clientName: 'WEB',
-              clientVersion: clientVersion || '2.20260401.00.00',
-              visitorData
-            }
-          },
-          params
-        });
-
-        const url = '/youtubei/v1/get_transcript?key=' + apiKey + '&prettyPrint=false';
-
-        // Try fetch first, then XHR if blocked (e.g. by uBlock)
-        let data;
-        try {
-          const resp = await fetch(url, { method: 'POST', headers, credentials: 'include', body });
-          if (!resp.ok) throw new Error('fetch ' + resp.status);
-          data = await resp.json();
-        } catch (fetchErr) {
-          // Fallback: XHR (bypasses some content script fetch interceptors)
-          data = await new Promise((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            xhr.open('POST', url);
-            xhr.withCredentials = true;
-            for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
-            xhr.onload = () => {
-              if (xhr.status >= 200 && xhr.status < 300) {
-                resolve(JSON.parse(xhr.responseText));
-              } else {
-                reject(new Error('XHR ' + xhr.status + ': ' + xhr.responseText.substring(0, 200)));
-              }
-            };
-            xhr.onerror = () => reject(new Error('XHR network error'));
-            xhr.send(body);
-          });
-        }
-
-        // Parse response: try actions path (new format)
-        const actions = data.actions || [];
-        for (const action of actions) {
-          const panel = action.updateEngagementPanelAction?.content?.transcriptRenderer;
-          if (!panel) continue;
-
-          const body = panel.body?.transcriptBodyRenderer;
-          if (!body) continue;
-
-          // Try cueGroups (most common)
-          const cueGroups = body.cueGroups || [];
-          if (cueGroups.length > 0) {
-            const lines = cueGroups.map(g => {
-              const cue = g.transcriptCueGroupRenderer?.cues?.[0]?.transcriptCueRenderer?.cue;
-              return cue?.simpleText || cue?.runs?.map(r => r.text).join('') || '';
-            }).filter(Boolean);
-            if (lines.length > 0) {
-              return { transcript: lines.join(' ').replace(/\s+/g, ' ').trim(), segments: lines.length, method: 'api-cueGroups' };
-            }
-          }
-
-          // Try initialSegments
-          const segments = body.initialSegments || [];
-          if (segments.length > 0) {
-            const lines = segments.map(s => {
-              const seg = s.transcriptSegmentRenderer;
-              if (!seg?.snippet) return '';
-              return seg.snippet.runs?.map(r => r.text).join('') || seg.snippet.simpleText || '';
-            }).filter(Boolean);
-            if (lines.length > 0) {
-              return { transcript: lines.join(' ').replace(/\s+/g, ' ').trim(), segments: lines.length, method: 'api-initialSegments' };
-            }
-          }
-        }
-
-        // Try transcriptSearchPanelRenderer path (searchable transcript format)
-        for (const action of actions) {
-          const searchPanel = action.updateEngagementPanelAction?.content?.transcriptSearchPanelRenderer;
-          if (!searchPanel) continue;
-
-          const body = searchPanel.body?.transcriptSegmentListRenderer;
-          const segments = body?.initialSegments || [];
-          if (segments.length > 0) {
-            const lines = segments.map(s => {
-              const seg = s.transcriptSegmentRenderer;
-              if (!seg?.snippet) return '';
-              return seg.snippet.runs?.map(r => r.text).join('') || seg.snippet.simpleText || '';
-            }).filter(Boolean);
-            if (lines.length > 0) {
-              return { transcript: lines.join(' ').replace(/\s+/g, ' ').trim(), segments: lines.length, method: 'api-searchPanel' };
-            }
-          }
-        }
-
-        return { error: 'no transcript in API response', keys: Object.keys(data), preview: JSON.stringify(data).substring(0, 500) };
-      } catch (e) {
-        return { error: e.message };
-      }
-    },
-    args: [videoId]
-  });
-
-  const result = results?.[0]?.result;
-  if (!result) {
-    console.error("YouTube Summary: [BG] No result from API extraction");
-    return null;
-  }
-
-  if (result.error) {
-    console.error("YouTube Summary: [BG] API extraction failed:", result.error, result.detail || result.preview || '');
-    return null;
-  }
-
-  console.log("YouTube Summary: [BG] API extracted", result.segments, "segments via", result.method, ",", result.transcript.length, "chars");
-  return result.transcript;
-}
-
-// Extract transcript by running code in the page's MAIN world via chrome.scripting
-// This bypasses the content script's isolated world limitation to access Polymer component data
-async function extractTranscriptFromMainWorld(tabId) {
-  console.log("YouTube Summary: [BG] Extracting transcript via MAIN world for tab:", tabId);
-
-  const results = await chrome.scripting.executeScript({
-    target: { tabId },
-    world: 'MAIN',
-    func: () => {
-      // Find any expanded transcript panel
-      const allPanels = document.querySelectorAll('ytd-engagement-panel-section-list-renderer');
-      let panel = Array.from(allPanels).find(p =>
-        p.getAttribute('visibility') === 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED' &&
-        (p.getAttribute('target-id')?.includes('transcript') ||
-         p.querySelector('ytd-item-section-renderer, yt-item-section-renderer') ||
-         p.querySelector('transcript-segment-view-model') ||
-         p.querySelector('[data-target-id*="transcript"]'))
-      );
-      if (!panel) {
-        panel = document.querySelector('[target-id="PAmodern_transcript_view"], [target-id*="transcript"]');
-      }
-      if (!panel) return { error: 'no panel found' };
-
-      // 2025+ format: transcript-segment-view-model with span text
-      const newSegEls = panel.querySelectorAll('transcript-segment-view-model');
-      if (newSegEls.length > 0) {
-        const texts = Array.from(newSegEls).map(el => {
-          const span = el.querySelector('span[role="text"]') || el.querySelector('span.ytAttributedStringHost');
-          return span?.textContent?.trim();
-        }).filter(Boolean);
-        if (texts.length > 0) {
-          return { transcript: texts.join(' ').replace(/\s+/g, ' ').trim(), segments: texts.length };
-        }
-      }
-
-      // Searchable transcript format: ytd-transcript-segment-renderer with yt-formatted-string.segment-text
-      const segmentEls = panel.querySelectorAll('ytd-transcript-segment-renderer yt-formatted-string.segment-text');
-      if (segmentEls.length > 0) {
-        const texts = Array.from(segmentEls).map(el => el.textContent?.trim()).filter(Boolean);
-        if (texts.length > 0) {
-          return { transcript: texts.join(' ').replace(/\s+/g, ' ').trim(), segments: texts.length };
-        }
-      }
-
-      // Item section format: ytd-item-section-renderer OR yt-item-section-renderer with component data
-      const sections = panel.querySelectorAll('ytd-item-section-renderer, yt-item-section-renderer');
-      const allContents = [];
-      for (const section of sections) {
-        const contents = section.data?.contents;
-        if (contents) allContents.push(...contents);
-      }
-      if (allContents.length === 0 && sections.length === 0) return { error: 'no contents' };
-
-      // macroMarkersPanelItemViewModel format
-      const texts = allContents.map(item => {
-        const vm = item.macroMarkersPanelItemViewModel?.item?.timelineItemViewModel;
-        if (!vm?.contentItems) return null;
-        return vm.contentItems
-          .map(ci => ci.transcriptSegmentViewModel?.simpleText)
-          .filter(Boolean)
-          .join(' ');
-      }).filter(Boolean);
-
-      if (texts.length > 0) {
-        return { transcript: texts.join(' ').replace(/\s+/g, ' ').trim(), segments: texts.length };
-      }
-
-      // Older format: transcriptSegmentRenderer
-      const textsOld = allContents.map(item => {
-        const seg = item.transcriptSegmentRenderer;
-        if (!seg?.snippet) return null;
-        if (seg.snippet.runs) return seg.snippet.runs.map(r => r.text).join('');
-        return seg.snippet.simpleText || null;
-      }).filter(Boolean);
-
-      if (textsOld.length > 0) {
-        return { transcript: textsOld.join(' ').replace(/\s+/g, ' ').trim(), segments: textsOld.length };
-      }
-
-      return { error: 'unknown structure', firstKey: allContents[0] ? Object.keys(allContents[0])[0] : 'empty' };
-    }
-  });
-
-  const result = results?.[0]?.result;
-  if (!result) {
-    console.error("YouTube Summary: [BG] No result from MAIN world script");
-    return null;
-  }
-
-  if (result.error) {
-    console.error("YouTube Summary: [BG] MAIN world extraction failed:", result.error, result.firstKey);
-    return null;
-  }
-
-  console.log("YouTube Summary: [BG] Extracted", result.segments, "segments,", result.transcript.length, "chars");
-  return result.transcript;
-}
-
-// Handle extension icon click
-chrome.action.onClicked.addListener((tab) => {
-  if (tab.url.includes("youtube.com/watch")) {
-    chrome.tabs.sendMessage(tab.id, { action: "triggerSummary" });
-  } else {
-    console.log("YouTube Summary: Not on a YouTube video page");
-  }
-});
-
-// Handle keyboard shortcut
+chrome.action.onClicked.addListener((tab) => openReader(tab).catch(() => {}));
 chrome.commands.onCommand.addListener((command) => {
-  if (command === "trigger-summary") {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      const tab = tabs[0];
-      if (tab && tab.url.includes("youtube.com/watch")) {
-        chrome.tabs.sendMessage(tab.id, { action: "triggerSummary" });
-      } else {
-        console.log("YouTube Summary: Not on a YouTube video page");
-      }
-    });
-  }
+  if (command === 'trigger-summary')
+    chrome.tabs
+      .query({ active: true, currentWindow: true })
+      .then(([tab]) => openReader(tab))
+      .catch(() => {});
 });

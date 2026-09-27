@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Notes de vidéo — YouTube Summary</title>
+    <link rel="stylesheet" href="reader.css" />
+  </head>
+  <body>
+    <div class="reader">
+      <header class="header">
+        <div class="window-actions">
+          <button
+            id="settings"
+            class="icon-button"
+            aria-label="Ouvrir les paramètres"
+            title="Paramètres"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 7h16M4 17h16M9 4v6M15 14v6" />
+            </svg>
+          </button>
+          <button
+            id="close"
+            class="icon-button"
+            aria-label="Fermer les notes"
+            title="Fermer · Échap"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m6 6 12 12M18 6 6 18" />
+            </svg>
+          </button>
+        </div>
+        <h1 id="video-title">Les idées qui méritent de rester.</h1>
+      </header>
+      <div class="navigation">
+        <div class="tabs" role="tablist" aria-label="Contenu de la vidéo">
+          <button
+            id="tab-summary"
+            role="tab"
+            aria-selected="true"
+            aria-controls="panel"
+            data-mode="summary"
+          >
+            Résumé
+          </button>
+          <button
+            id="tab-qa"
+            role="tab"
+            aria-selected="false"
+            aria-controls="panel"
+            tabindex="-1"
+            data-mode="qa"
+          >
+            Questions-réponses
+          </button>
+          <button
+            id="tab-transcript"
+            role="tab"
+            aria-selected="false"
+            aria-controls="panel"
+            tabindex="-1"
+            data-mode="transcript"
+          >
+            Transcription
+          </button>
+        </div>
+        <div class="toolbar">
+          <div
+            id="detail-control"
+            class="reading-modes"
+            role="group"
+            aria-label="Niveau de détail"
+          >
+            <button data-detail="short" aria-pressed="false">Courte</button>
+            <button data-detail="detailed" aria-pressed="true">Détaillée</button>
+            <button data-detail="deep" aria-pressed="false">Approfondie</button>
+          </div>
+          <label id="search-control" class="search" hidden
+            ><span class="sr-only">Rechercher dans la transcription</span
+            ><input
+              id="search"
+              type="search"
+              placeholder="Rechercher un passage…"
+          /></label>
+          <div class="tools">
+            <button id="stop" class="text-button" hidden>Arrêter</button>
+            <div class="copy-control">
+              <select id="copy-format" aria-label="Format de copie">
+                <option value="markdown">Markdown</option>
+                <option value="text">Texte</option>
+                <option value="all">Toutes les notes</option>
+                <option value="download">Fichier .md</option></select
+              ><button id="copy" disabled>Copier</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="notice" class="notice" role="alert" hidden>
+        <span id="notice-text"></span
+        ><button id="retry" class="text-button" hidden>Réessayer</button
+        ><button id="configure" class="text-button" hidden>Paramètres</button>
+      </div>
+      <div id="source-warning" class="source-warning" hidden>
+        Transcription potentiellement partielle : YouTube n’a fourni que les
+        passages accessibles. Les notes peuvent omettre une partie de la vidéo.
+      </div>
+      <div class="reading-area" id="reading-area">
+        <main
+          id="panel"
+          role="tabpanel"
+          aria-labelledby="tab-summary"
+          tabindex="0"
+        >
+          <div id="empty" class="empty">
+            <span class="eyebrow">Préparation des notes</span>
+            <h2>De la vidéo à l’essentiel.</h2>
+            <p id="empty-text">Récupération de la transcription…</p>
+            <div class="skeleton" aria-hidden="true"><i></i><i></i><i></i></div>
+          </div>
+          <article id="article" class="prose" hidden></article>
+          <div id="transcript" hidden></div>
+        </main>
+      </div>
+      <span id="status" class="sr-only" role="status" aria-live="polite"
+        >Préparation…</span
+      >
+    </div>
+    <script type="module" src="reader.js"></script>
+  </body>
+</html>

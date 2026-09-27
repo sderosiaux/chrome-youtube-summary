@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
   "name": "YouTube Summary",
-  "version": "1.0",
-  "description": "Generate AI summaries of YouTube videos based on their transcripts",
+  "version": "2.0.0",
+  "minimum_chrome_version": "120",
+  "description": "Résumés, questions-réponses et transcription horodatée avec GPT-6 Luna.",
 
   "permissions": ["activeTab", "storage", "scripting"],
 
-  "host_permissions": ["https://www.youtube.com/*"],
+  "host_permissions": ["https://www.youtube.com/*", "https://api.openai.com/*"],
 
   "icons": {
     "16": "icons/icon16.png",
@@ -22,13 +23,22 @@
 
   "content_scripts": [
     {
-      "matches": ["https://www.youtube.com/watch*"],
+      "matches": ["https://www.youtube.com/*"],
       "js": ["content.js"],
       "css": ["content.css"],
       "run_at": "document_idle"
     }
   ],
 
+  "web_accessible_resources": [
+    {
+      "resources": ["reader.html"],
+      "matches": ["https://www.youtube.com/*"]
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'self' https://api.openai.com; img-src 'self' data:; style-src 'self'; base-uri 'none'; form-action 'none'"
+  },
   "action": {
     "default_title": "Summarize YouTube Video",
     "default_icon": {

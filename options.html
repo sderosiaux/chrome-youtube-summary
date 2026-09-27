@@ -1,60 +1,129 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YouTube Summary - Settings</title>
-    <link rel="stylesheet" href="options.css">
-</head>
-<body>
-    <div class="container">
-        <header>
-            <h1>YouTube Summary Settings</h1>
-            <p>Configure your OpenAI API key and customize the summary prompt</p>
-        </header>
-
-        <main>
-            <section class="settings-section">
-                <h2>OpenAI Configuration</h2>
-                <div class="form-group">
-                    <label for="apiKey">OpenAI API Key</label>
-                    <input type="password" id="apiKey" placeholder="sk-..." required>
-                    <small>Your API key is stored locally and never shared. Get one at <a href="https://platform.openai.com/api-keys" target="_blank">OpenAI Platform</a></small>
-                </div>
-            </section>
-
-            <section class="settings-section">
-                <h2>Summary Prompt</h2>
-                <div class="form-group">
-                    <label for="customPrompt">Custom Prompt (Optional)</label>
-                    <textarea id="customPrompt" rows="8" placeholder="Enter your custom prompt for the AI summary..."></textarea>
-                    <small>Leave empty to use the default prompt. The prompt will be combined with the video title, channel, and transcript.</small>
-                </div>
-            </section>
-
-            <section class="settings-section">
-                <h2>Usage Instructions</h2>
-                <div class="instructions">
-                    <ol>
-                        <li>Set your OpenAI API key above</li>
-                        <li>Optionally customize the summary prompt</li>
-                        <li>Navigate to any YouTube video</li>
-                        <li>Click the extension icon or use the keyboard shortcut</li>
-                        <li>Wait for the AI to generate your summary</li>
-                    </ol>
-                    <p><strong>Note:</strong> The extension works best with videos that have captions/transcripts available.</p>
-                </div>
-            </section>
-
-            <div class="actions">
-                <button id="save" class="btn btn-primary">Save Settings</button>
-                <button id="reset" class="btn btn-secondary">Reset to Defaults</button>
-            </div>
-
-            <div id="status" class="status hidden"></div>
-        </main>
-    </div>
-
-    <script src="options.js"></script>
-</body>
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Paramètres — YouTube Summary</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main class="settings">
+      <header>
+        <p class="eyebrow">YouTube Summary</p>
+        <h1>Des notes à ta façon.</h1>
+        <p>Le contenu essentiel de tes vidéos, avec GPT-6 Luna.</p>
+      </header>
+      <p
+        id="status"
+        class="status-message"
+        role="status"
+        aria-live="polite"
+        hidden
+      ></p>
+      <form id="settings-form">
+        <section>
+          <div class="section-heading">
+            <span>01</span>
+            <h2>Connexion à OpenAI</h2>
+          </div>
+          <label for="apiKey">Clé API</label>
+          <div class="key-field">
+            <input
+              type="password"
+              id="apiKey"
+              placeholder="Ta clé OpenAI"
+              autocomplete="off"
+              spellcheck="false"
+            /><button type="button" id="reveal" aria-label="Afficher la clé">
+              Afficher
+            </button>
+          </div>
+          <p class="help">
+            La transcription et le titre de la vidéo sont envoyés à OpenAI
+            lorsque tu demandes des notes. Les appels utilisent ton crédit API.
+            <a
+              href="https://platform.openai.com/api-keys"
+              target="_blank"
+              rel="noopener noreferrer"
+              >Créer une clé</a
+            >
+          </p>
+          <label class="checkbox"
+            ><input type="checkbox" id="rememberKey" /><span
+              >Mémoriser la clé sur cet appareil</span
+            ></label
+          >
+          <p class="help">
+            Sinon, elle est conservée uniquement jusqu’à la fermeture du
+            navigateur. Elle n’est jamais synchronisée via Chrome Sync. Le
+            stockage local de l’extension n’est pas un coffre chiffré.
+          </p>
+          <div class="inline-actions">
+            <button type="button" id="testKey">Vérifier l’accès à Luna</button
+            ><button type="button" id="removeKey" class="subtle">
+              Supprimer la clé
+            </button>
+          </div>
+        </section>
+        <section>
+          <div class="section-heading">
+            <span>02</span>
+            <h2>Préférences de lecture</h2>
+          </div>
+          <label for="detail">Format par défaut</label>
+          <select id="detail">
+            <option value="short">Court — les idées essentielles</option>
+            <option value="detailed">
+              Détaillé — idées, exemples et nuances
+            </option>
+            <option value="deep">Approfondi — raisonnement, exemples et nuances</option>
+          </select>
+          <p class="help">
+            Tu peux changer de format dans chaque vidéo. Les notes déjà générées
+            sont conservées séparément. La structure par défaut s’adapte au
+            contenu : conférence, conversation, explication ou témoignage.
+          </p>
+          <label for="customPrompt">Instructions de résumé</label>
+          <textarea
+            id="customPrompt"
+            rows="9"
+            placeholder="Utiliser les instructions par défaut"
+          ></textarea>
+          <p class="help">
+            Ces instructions remplacent l’organisation par défaut du résumé. Les
+            règles de fidélité à la transcription restent actives. Les
+            questions-réponses utilisent leur propre structure.
+          </p>
+          <button id="resetPrompt" type="button" class="subtle">
+            Rétablir les instructions par défaut
+          </button>
+          <details>
+            <summary>Voir les instructions par défaut</summary>
+            <pre id="defaultPrompt"></pre>
+          </details>
+        </section>
+        <section>
+          <div class="section-heading">
+            <span>03</span>
+            <h2>Notes enregistrées</h2>
+          </div>
+          <p>
+            Les dernières notes sont conservées sur cet appareil pour pouvoir
+            les rouvrir sans nouvel appel à OpenAI.
+          </p>
+          <button id="clearCache" type="button">
+            Effacer les notes enregistrées
+          </button>
+        </section>
+        <div class="save-row">
+          <button id="save" class="primary" type="submit">Enregistrer</button>
+        </div>
+      </form>
+      <footer>
+        Sur une vidéo YouTube, utilise « Résumer la vidéo » ou le raccourci
+        ⌘/Ctrl + Maj + S.
+      </footer>
+    </main>
+    <script type="module" src="options.js"></script>
+  </body>
 </html>
