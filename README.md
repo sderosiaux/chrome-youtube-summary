@@ -26,6 +26,10 @@ Les options permettent de choisir le format par défaut, remplacer les instructi
 
 Le lecteur, les paramètres et le bouton YouTube suivent automatiquement le thème clair ou sombre du système, y compris lors d’un changement pendant la lecture.
 
+Les résumés et Q/R peuvent intégrer des schémas entre les paragraphes lorsqu’un workflow, une décision ou des relations entre concepts s’y prêtent. Ils reprennent les informations sourcées du passage, sans appel IA supplémentaire. Le prompt évalue chaque section et chaque mécanisme indépendamment, sans quota global ni obligation d’illustrer chaque section. La lecture courte privilégie les mécanismes essentiels ; les formats longs couvrent aussi les autres mécanismes qui gagnent à être visualisés, sans répéter un schéma équivalent. Les objectifs de longueur de prose excluent le JSON des schémas, sans augmenter les plafonds de sortie. Les schémas suivent le thème du système et les plus larges se parcourent horizontalement sur petit écran. Une description textuelle est disponible aux lecteurs d’écran.
+
+La copie Markdown et le téléchargement exportent les schémas en blocs Mermaid ; la copie texte restitue les relations avec des flèches. Les anciens résultats sont renouvelés avec la nouvelle version des prompts lors de la prochaine génération.
+
 ## Prompts et modèle
 
 Le modèle est défini dans `config.js` : `gpt-6-luna`, avec `reasoning.effort: none`. Les requêtes utilisent `stream: true` et `store: false`, sans température imposée.
@@ -49,7 +53,7 @@ Le Q/R utilise un [schéma JSON strict](https://developers.openai.com/api/docs/g
 - Les brouillons interrompus sont conservés dans le stockage de session ; les retrouver ne relance pas automatiquement une requête payante.
 - `store: false` désactive le stockage de la réponse comme état réutilisable dans Responses. Cela ne remplace pas les politiques de traitement et de rétention d’OpenAI : voir [les contrôles de données de l’API](https://developers.openai.com/api/docs/guides/your-data).
 
-Les bibliothèques et les styles sont embarqués, sans CDN, police distante ni image de tracking. Le rendu Markdown est nettoyé avec DOMPurify ; le HTML brut et les images générées par le modèle ne sont pas interprétés.
+Les bibliothèques et les styles sont embarqués, sans CDN, police distante ni image de tracking. Le rendu Markdown est nettoyé avec DOMPurify ; le HTML brut et les images générées par le modèle ne sont pas interprétés. Les schémas sont des graphes JSON validés et transformés localement en SVG par l’extension, jamais du SVG fourni par le modèle. Un schéma incomplet ou invalide reste masqué et ne bloque pas le texte environnant.
 
 ## Architecture
 
@@ -60,6 +64,7 @@ Les bibliothèques et les styles sont embarqués, sans CDN, police distante ni i
 | `transcript.js` | Extraction depuis les données des composants, le DOM et le fallback `get_transcript` |
 | `reader.html`, `reader.js`, `reader.css` | Page de lecture dans une iframe de l’extension, états séparés et navigation clavier |
 | `theme.css` | Couleurs claires et sombres partagées par le lecteur et les paramètres |
+| `diagrams.js`, `diagrams.css` | Instructions, validation, dessin SVG et exports des schémas intégrés |
 | `api.js` | Appel Responses, flux SSE, annulation, timeout, erreurs et tentatives limitées |
 | `qa.js` | Lecture du Q/R structuré, limites, détection des répétitions et conversion en Markdown |
 | `config.js` | Luna, prompts communs, formats et normalisation |

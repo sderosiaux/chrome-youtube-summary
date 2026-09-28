@@ -8,6 +8,7 @@ import { generate } from './api.js';
 import { generateQA } from './qa.js';
 import { getSettings, cacheKey, readCache, writeCache } from './storage.js';
 import { renderMarkdown } from './render.js';
+import { exportDiagrams, readableDiagramText } from './diagrams.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -496,7 +497,7 @@ function exportText(all = false) {
     return (
       heading +
       (stateFor().status === 'complete' ? '' : '> Texte partiel\n\n') +
-      stateFor().text
+      exportDiagrams(stateFor().text)
     );
   const detail = selectedDetail;
   let text = heading;
@@ -506,7 +507,7 @@ function exportText(all = false) {
   ]) {
     const state = states.get(`${kind}:${detail}`);
     if (state?.text)
-      text += `## ${label}\n\n${state.status === 'complete' ? '' : '> Texte partiel\n\n'}${state.text}\n\n`;
+      text += `## ${label}\n\n${state.status === 'complete' ? '' : '> Texte partiel\n\n'}${exportDiagrams(state.text)}\n\n`;
   }
   return text + `## Transcription\n\n${transcriptText()}`;
 }
@@ -515,7 +516,7 @@ $('copy').addEventListener('click', async () => {
   try {
     let text = exportText(format === 'all');
     if (format === 'text')
-      text = `${metadata.title}\n${metadata.url}\n\n${mode !== 'transcript' && stateFor().status !== 'complete' ? 'Texte partiel\n\n' : ''}${mode === 'transcript' ? transcriptText() : $('article').innerText}`;
+      text = `${metadata.title}\n${metadata.url}\n\n${mode !== 'transcript' && stateFor().status !== 'complete' ? 'Texte partiel\n\n' : ''}${mode === 'transcript' ? transcriptText() : readableDiagramText($('article'))}`;
     if (format === 'download') {
       const url = URL.createObjectURL(
         new Blob([text], { type: 'text/markdown;charset=utf-8' }),

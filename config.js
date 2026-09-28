@@ -1,6 +1,8 @@
+import { DIAGRAM_INSTRUCTIONS } from './diagrams.js';
+
 export const MODEL = 'gpt-6-luna';
-export const PROMPT_VERSION = '2026-09-27.2';
-export const QA_PROMPT_VERSION = '2026-09-27.qa.2';
+export const PROMPT_VERSION = '2026-09-27.4';
+export const QA_PROMPT_VERSION = '2026-09-27.qa.4';
 export const QA_LEVELS = {
   short: { answerLength: '1 à 2 phrases' },
   detailed: { answerLength: '2 à 4 phrases' },
@@ -48,7 +50,7 @@ N'utilise que les informations présentes dans la transcription. N'invente aucun
 Les guillemets sont réservés aux citations exactes. Présente une traduction ou reformulation comme telle, sans la faire passer pour une citation exacte.
 Supprime les publicités, salutations et répétitions sans perdre les nuances de fond.
 Pour sourcer une idée, recopie un timestamp fourni sous la forme [MM:SS] ou [H:MM:SS]. N'invente ni n'estime un timestamp. Si aucun timestamp n'est fourni, n'en ajoute pas.
-N'utilise ni HTML ni images. Respecte le format de sortie demandé par la tâche.`;
+N'utilise ni HTML, ni SVG brut, ni images externes. Les schémas utilisent uniquement le format diagram décrit dans les instructions. Respecte le format de sortie demandé par la tâche.`;
 
 export function buildRequest({
   mode,
@@ -112,8 +114,8 @@ Si la transcription ne permet aucune question pertinente, renvoie un tableau que
       : {}),
     instructions:
       mode === 'qa'
-        ? `${GROUNDING}\n\n${task}`
-        : `${GROUNDING}\n\nÉcris uniquement du Markdown lisible, sans bloc de code englobant la réponse.\n\nNiveau de détail : ${level.instruction}\n\n${task}`,
+        ? `${GROUNDING}\n\nNiveau de lecture : ${level.label}.\n\n${task}\n\n${DIAGRAM_INSTRUCTIONS}`
+        : `${GROUNDING}\n\nÉcris uniquement du Markdown lisible, sans bloc de code englobant la réponse.\n\nNiveau de lecture : ${level.label}. ${level.instruction}\n\n${task}\n\n${DIAGRAM_INSTRUCTIONS}`,
     input: [
       {
         role: 'user',

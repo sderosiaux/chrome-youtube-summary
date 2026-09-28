@@ -1,6 +1,7 @@
 import { marked } from './vendor/marked.js';
 import DOMPurify from './vendor/purify.js';
 import { formatTime } from './config.js';
+import { splitDiagrams, renderDiagram } from './diagrams.js';
 
 const escapeHTML = (text) =>
   text.replace(
@@ -15,41 +16,32 @@ renderer.html = (token) => escapeHTML(token.text);
 renderer.image = () => '';
 
 export function renderMarkdown(container, text, segments = []) {
-  const parsed = marked.parse(text || '', {
-    renderer,
-    gfm: true,
-    breaks: false,
-    async: false,
-  });
-  container.innerHTML = DOMPurify.sanitize(parsed, {
-    ALLOWED_TAGS: [
-      'h1',
-      'h2',
-      'h3',
-      'h4',
-      'p',
-      'ul',
-      'ol',
-      'li',
-      'strong',
-      'em',
-      'del',
-      'blockquote',
-      'pre',
-      'code',
-      'a',
-      'br',
-      'hr',
-      'table',
-      'thead',
-      'tbody',
-      'tr',
-      'th',
-      'td',
-    ],
-    ALLOWED_ATTR: ['href', 'title', 'start'],
-    ALLOW_DATA_ATTR: false,
-  });
+  const previous = [...container.querySelectorAll('.inline-diagram')];
+  const focused = container.contains(document.activeElement) &&
+    document.activeElement.closest('.inline-diagram') ? document.activeElement : null;
+  let diagramIndex = 0;
+  container.replaceChildren();
+  for (const part of splitDiagrams(text)) {
+    if (part.type === 'diagram') {
+      const figure = renderDiagram(part.diagram, previous[diagramIndex++]);
+      if (figure) container.append(figure);
+      continue;
+    }
+    const parsed = marked.parse(part.text, {
+      renderer, gfm: true, breaks: false, async: false,
+    });
+    container.append(DOMPurify.sanitize(parsed, {
+      RETURN_DOM_FRAGMENT: true,
+      ALLOWED_TAGS: [
+        'h1', 'h2', 'h3', 'h4', 'p', 'ul', 'ol', 'li', 'strong', 'em',
+        'del', 'blockquote', 'pre', 'code', 'a', 'br', 'hr', 'table',
+        'thead', 'tbody', 'tr', 'th', 'td',
+      ],
+      ALLOWED_ATTR: ['href', 'title', 'start'],
+      ALLOW_DATA_ATTR: false,
+    }));
+  }
+  if (focused && container.contains(focused)) focused.focus({ preventScroll: true });
   for (const link of container.querySelectorAll('a')) {
     try {
       const url = new URL(link.getAttribute('href'));
@@ -68,7 +60,7 @@ export function renderMarkdown(container, text, segments = []) {
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
   const nodes = [];
   while (walker.nextNode())
-    if (!walker.currentNode.parentElement.closest('a, code, pre'))
+    if (!walker.currentNode.parentElement.closest('a, code, pre, .inline-diagram'))
       nodes.push(walker.currentNode);
   for (const node of nodes) {
     const pattern = /\[(\d{1,3}:\d{2}(?::\d{2})?)\]/g;
