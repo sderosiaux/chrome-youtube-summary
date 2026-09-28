@@ -24,6 +24,8 @@ Sur une vidéo, cliquer sur **Résumer la vidéo**, sur l’icône de l’extens
 
 Les options permettent de choisir le format par défaut, remplacer les instructions du résumé, vérifier l’accès à Luna, supprimer la clé et effacer les notes enregistrées. Le contrôle de clé consulte le catalogue des modèles : il ne génère pas de texte et ne vérifie pas le crédit disponible.
 
+Le lecteur, les paramètres et le bouton YouTube suivent automatiquement le thème clair ou sombre du système, y compris lors d’un changement pendant la lecture.
+
 ## Prompts et modèle
 
 Le modèle est défini dans `config.js` : `gpt-6-luna`, avec `reasoning.effort: none`. Les requêtes utilisent `stream: true` et `store: false`, sans température imposée.
@@ -57,6 +59,7 @@ Les bibliothèques et les styles sont embarqués, sans CDN, police distante ni i
 | `background.js` | Messages validés, raccourcis et exécution dans le contexte YouTube |
 | `transcript.js` | Extraction depuis les données des composants, le DOM et le fallback `get_transcript` |
 | `reader.html`, `reader.js`, `reader.css` | Page de lecture dans une iframe de l’extension, états séparés et navigation clavier |
+| `theme.css` | Couleurs claires et sombres partagées par le lecteur et les paramètres |
 | `api.js` | Appel Responses, flux SSE, annulation, timeout, erreurs et tentatives limitées |
 | `qa.js` | Lecture du Q/R structuré, limites, détection des répétitions et conversion en Markdown |
 | `config.js` | Luna, prompts communs, formats et normalisation |

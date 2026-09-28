@@ -54,7 +54,17 @@
     host.id = 'yt-summary-reader';
     const root = host.attachShadow({ mode: 'closed' });
     const style = document.createElement('style');
-    style.textContent = `:host{all:initial}dialog{box-sizing:border-box;padding:0;border:1px solid #deded9;border-radius:12px;width:min(1120px,calc(100vw - 16px));height:calc(100dvh - 40px);max-width:none;max-height:none;background:#fff;box-shadow:0 28px 100px #171b2533;overflow:hidden}dialog::backdrop{background:#151b2859;backdrop-filter:blur(3px)}iframe{display:block;width:100%;height:100%;border:0} @media(max-width:640px){dialog{width:100vw;height:calc(100dvh - 24px);border:0;border-radius:8px;margin:12px 0}}`;
+    style.textContent = `
+      :host{all:initial;color-scheme:light;--reader-paper:#fff;--reader-line:#deded9;--reader-shadow:#171b2533}
+      dialog{box-sizing:border-box;padding:0;border:1px solid var(--reader-line);border-radius:12px;width:min(1120px,calc(100vw - 16px));height:calc(100dvh - 40px);max-width:none;max-height:none;background:var(--reader-paper);box-shadow:0 28px 100px var(--reader-shadow);overflow:hidden;color-scheme:inherit}
+      dialog::backdrop{background:#151b2859;backdrop-filter:blur(3px)}
+      iframe{display:block;width:100%;height:100%;border:0;background:var(--reader-paper);color-scheme:inherit}
+      @media(prefers-color-scheme:dark){
+        :host{color-scheme:dark;--reader-paper:#1b1e1a;--reader-line:#3a4235;--reader-shadow:#00000080}
+        dialog::backdrop{background:#00000080}
+      }
+      @media(max-width:640px){dialog{width:100vw;height:calc(100dvh - 24px);border:0;border-radius:8px;margin:12px 0}}
+    `;
     const dialog = document.createElement('dialog');
     dialog.setAttribute('aria-label', 'Notes de la vidéo');
     const frame = document.createElement('iframe');

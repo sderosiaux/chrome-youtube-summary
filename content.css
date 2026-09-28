@@ -1,15 +1,22 @@
 #yt-summary-fab {
   all: initial;
+  color-scheme: light;
+  --fab-paper: #fff;
+  --fab-ink: #242922;
+  --fab-line: #deded9;
+  --fab-hover: #f3f5ee;
+  --fab-focus: #52734a;
+  --fab-shadow: #1720131a;
   position: fixed;
   right: 24px;
   bottom: 24px;
   z-index: 2000;
   padding: 12px 19px;
-  border: 1px solid #deded9;
+  border: 1px solid var(--fab-line);
   border-radius: 10px;
-  background: #fff;
-  color: #242922;
-  box-shadow: 0 4px 20px #1720131a;
+  background: var(--fab-paper);
+  color: var(--fab-ink);
+  box-shadow: 0 4px 20px var(--fab-shadow);
   font:
     600 14px/1.4 system-ui,
     sans-serif;
@@ -19,15 +26,26 @@
     transform 160ms ease;
 }
 #yt-summary-fab:hover {
-  background: #f3f5ee;
+  background: var(--fab-hover);
   transform: translateY(-2px);
 }
 #yt-summary-fab:active {
   transform: translateY(0);
 }
 #yt-summary-fab:focus-visible {
-  outline: 3px solid #52734a;
+  outline: 3px solid var(--fab-focus);
   outline-offset: 3px;
+}
+@media (prefers-color-scheme: dark) {
+  #yt-summary-fab {
+    color-scheme: dark;
+    --fab-paper: #1b1e1a;
+    --fab-ink: #e7ebe3;
+    --fab-line: #3a4235;
+    --fab-hover: #242a21;
+    --fab-focus: #bddaa9;
+    --fab-shadow: #00000066;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   #yt-summary-fab {
