@@ -9,6 +9,8 @@ import { generateQA } from './qa.js';
 import { getSettings, cacheKey, readCache, writeCache } from './storage.js';
 import { renderMarkdown } from './render.js';
 import { exportDiagrams, readableDiagramText } from './diagrams.js';
+import { createArchiveControl } from './github-archive-ui.js';
+import { summaryArchive } from './archive.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -24,6 +26,10 @@ let metadata,
 let sourceVersion = 0;
 let mode = 'summary';
 let selectedDetail = 'detailed';
+const archive = createArchiveControl({ button: $('archive-button'),
+  isReady: () => Boolean(metadata && source && settings && !closed),
+  getDocument: () => summaryArchive({ metadata, source, settings, states }),
+});
 const stateKey = () => `${mode}:${selectedDetail}`;
 const busy = (state) => ['preparing', 'generating'].includes(state?.status);
 function stateFor(key = stateKey()) {
@@ -132,6 +138,7 @@ function drawTranscript() {
 }
 function paint() {
   if (closed) return;
+  archive.update();
   const transcriptMode = mode === 'transcript';
   const state = stateFor();
   const working = transcriptMode ? Boolean(sourcePromise) : busy(state);
@@ -455,6 +462,7 @@ $('panel').addEventListener('click', (event) => {
   }
 });
 document.addEventListener('keydown', (event) => {
+  if (document.getElementById('github-archive-dialog')?.open) return;
   if (event.key === 'Escape') {
     event.preventDefault();
     close();

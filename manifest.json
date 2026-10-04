@@ -7,7 +7,7 @@
 
   "permissions": ["activeTab", "storage", "scripting"],
 
-  "host_permissions": ["https://www.youtube.com/*", "https://api.openai.com/*"],
+  "host_permissions": ["https://www.youtube.com/*", "https://api.openai.com/*", "https://api.github.com/*"],
 
   "icons": {
     "16": "icons/icon16.png",
@@ -37,7 +37,7 @@
     }
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'self' https://api.openai.com; img-src 'self' data:; style-src 'self'; base-uri 'none'; form-action 'none'"
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'self' https://api.openai.com https://api.github.com; img-src 'self' data:; style-src 'self'; base-uri 'none'; form-action 'none'"
   },
   "action": {
     "default_title": "Summarize YouTube Video",

@@ -1,5 +1,6 @@
 import { DEFAULT_PROMPT, DETAIL_LEVELS, MODEL } from './config.js';
 import { getSettings, saveSettings, clearCache } from './storage.js';
+import { openArchiveSettings } from './github-archive-ui.js';
 
 const $ = (id) => document.getElementById(id);
 const status = (text, type = 'success') => {
@@ -7,6 +8,7 @@ const status = (text, type = 'success') => {
   $('status').dataset.type = type;
   $('status').hidden = false;
 };
+$('archive-settings').addEventListener('click', () => openArchiveSettings().catch(error => status(error.message, 'error')));
 $('defaultPrompt').textContent = DEFAULT_PROMPT;
 async function load() {
   try {

@@ -6,7 +6,7 @@ Extension Chrome pour transformer une vidéo YouTube en notes de lecture en fran
 
 1. Ouvrir `chrome://extensions` et activer le mode développeur.
 2. Choisir **Charger l’extension non empaquetée** et sélectionner ce dossier.
-3. Pour une installation existante, cliquer sur **Recharger** et actualiser les onglets YouTube déjà ouverts. La nouvelle version ajoute l’accès à `api.openai.com`.
+3. Pour une installation existante, cliquer sur **Recharger** et actualiser les onglets YouTube déjà ouverts. L’archivage ajoute l’accès à `api.github.com`.
 4. Ouvrir les options de l’extension et enregistrer une clé API OpenAI disposant d’un accès à `gpt-6-luna` et de crédit API.
 
 Chrome 120 ou plus récent est requis. Les bibliothèques du rendu sont incluses dans `vendor/` : aucun build ni serveur n’est nécessaire pour charger l’extension.
@@ -29,6 +29,14 @@ Le lecteur, les paramètres et le bouton YouTube suivent automatiquement le thè
 Les résumés et Q/R peuvent intégrer des schémas entre les paragraphes lorsqu’un workflow, une décision ou des relations entre concepts s’y prêtent. Ils reprennent les informations sourcées du passage, sans appel IA supplémentaire. Le prompt évalue chaque section et chaque mécanisme indépendamment, sans quota global ni obligation d’illustrer chaque section. La lecture courte privilégie les mécanismes essentiels ; les formats longs couvrent aussi les autres mécanismes qui gagnent à être visualisés, sans répéter un schéma équivalent. Les objectifs de longueur de prose excluent le JSON des schémas, sans augmenter les plafonds de sortie. Les schémas suivent le thème du système et les plus larges se parcourent horizontalement sur petit écran. Une description textuelle est disponible aux lecteurs d’écran.
 
 La copie Markdown et le téléchargement exportent les schémas en blocs Mermaid ; la copie texte restitue les relations avec des flèches. Les anciens résultats sont renouvelés avec la nouvelle version des prompts lors de la prochaine génération.
+
+## Archives GitHub
+
+**Archiver sur GitHub** enregistre le résumé terminé le plus complet déjà disponible : approfondi, puis détaillé, puis court. Le bouton consulte les notes en mémoire et le cache correspondant à cette vidéo, aux sources et aux paramètres actuels, quel que soit l’onglet affiché. Il ne lance aucune génération et n’archive ni les Q/R ni les brouillons interrompus.
+
+Le dépôt proposé est `sderosiaux/saved-youtube-hackernews-reddit-summaries`, commun aux trois extensions. Le premier clic ouvre la configuration ; elle reste accessible dans les options via **Configurer les archives GitHub**. Renseigner un [jeton GitHub à accès limité](https://github.com/settings/personal-access-tokens/new), autorisé sur ce dépôt avec **Contents: Read and write**. Le même jeton peut être saisi dans les trois extensions ; la connexion de la CLI `gh` n’est pas partagée avec Chrome. Le jeton reste en session, ou sur cet appareil si demandé, jamais dans Chrome Sync.
+
+Chaque clic crée ou actualise `youtube/<videoId>.md` via l’API GitHub, sur la branche par défaut ou celle configurée. Le Markdown inclut titre, URL, niveau, langue, schémas Mermaid et liens horodatés vers la vidéo. Les avertissements de transcription partielle restent présents. Un contenu identique ne crée pas de commit ; une version plus courte ne remplace pas une archive plus approfondie. Un fichier non créé par les extensions n’est pas écrasé. Un lien vers le fichier apparaît après l’archivage.
 
 ## Prompts et modèle
 

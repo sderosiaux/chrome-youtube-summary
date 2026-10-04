@@ -179,10 +179,11 @@ input {
 }
 .tools {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   margin-left: auto;
-  flex-shrink: 0;
+  min-width: 0;
 }
 .text-button {
   border: 0;
